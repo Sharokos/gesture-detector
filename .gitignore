@@ -1,0 +1,5 @@
+.venv
+output_jsons
+output_json_folder
+__pycache__
+video.avi
