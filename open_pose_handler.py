@@ -31,8 +31,7 @@ def run_openpose(video_path, output_json_dir, openpose_dir, openpose_args=""):
     ] + openpose_args.split()
 
     # Launch OpenPose with cwd set to OpenPose directory
-    process = subprocess.Popen(cmd, cwd=str(openpose_dir), stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL)
+    process = subprocess.Popen(cmd, cwd=str(openpose_dir))#, stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
 
     # Progress bar logic
     print("Running OpenPose...")
