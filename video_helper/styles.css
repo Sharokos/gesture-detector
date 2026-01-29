@@ -1,0 +1,216 @@
+
+body {
+font-family: system-ui, sans-serif;
+background: #111;
+color: #eee;
+padding: 20px;
+}
+
+
+video {
+max-width: 100%;
+margin: 10px 0;
+background: #000;
+}
+
+
+.main-container {
+display: flex;
+gap: 20px;
+align-items: flex-start;
+}
+
+
+.video-section {
+flex: 1;
+min-width: 300px;
+}
+
+
+.controls {
+display: grid;
+grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+gap: 12px;
+}
+
+
+.timestamps-card {
+flex: 0 0 350px;
+max-height: 80vh;
+overflow-y: auto;
+}
+
+
+.card {
+background: #1c1c1c;
+padding: 12px;
+border-radius: 10px;
+}
+
+
+label {
+font-size: 0.9rem;
+opacity: 0.8;
+}
+
+
+input, select, button {
+width: 100%;
+margin-top: 6px;
+padding: 6px;
+}
+
+
+.step-buttons {
+display: flex;
+gap: 6px;
+margin-top: 8px;
+}
+
+
+button {
+cursor: pointer;
+}
+
+
+.readout {
+font-size: 1.1rem;
+}
+
+.timestamp-controls {
+display: flex;
+gap: 6px;
+margin-bottom: 12px;
+}
+
+.timestamp-controls button {
+flex: 1;
+padding: 8px;
+background: #2c2c2c;
+border: 1px solid #444;
+color: #eee;
+border-radius: 5px;
+font-size: 0.9rem;
+}
+
+.timestamp-controls button:hover {
+background: #3c3c3c;
+}
+
+.timestamp-controls #exportJsonBtn {
+background: #1a5f1a;
+}
+
+.timestamp-controls #exportJsonBtn:hover {
+background: #2a7f2a;
+}
+
+.timestamps-list {
+max-height: 300px;
+overflow-y: auto;
+background: #0a0a0a;
+padding: 10px;
+border-radius: 5px;
+border: 1px solid #333;
+}
+
+.no-timestamps {
+text-align: center;
+color: #666;
+padding: 20px;
+}
+
+.timestamp-item {
+display: flex;
+justify-content: space-between;
+align-items: center;
+padding: 8px;
+margin: 4px 0;
+background: #1c1c1c;
+border-left: 3px solid #0088ff;
+border-radius: 3px;
+font-size: 0.95rem;
+}
+
+.timestamp-item:hover {
+background: #252525;
+}
+
+.timestamp-item .time-info {
+flex: 1;
+}
+
+.timestamp-item .cut-info {
+color: #999;
+font-size: 0.85rem;
+margin-left: 10px;
+}
+
+.timestamp-item button {
+width: auto;
+padding: 4px 8px;
+margin: 0;
+background: #3c1c1c;
+border: 1px solid #666;
+color: #ff6666;
+font-size: 0.85rem;
+border-radius: 3px;
+}
+
+.timestamp-item button:hover {
+background: #5c2c2c;
+}
+
+.gesture-section {
+margin-top: 15px;
+}
+
+.gesture-section label {
+display: block;
+margin-bottom: 8px;
+font-size: 0.9rem;
+}
+
+.gesture-section input[type="file"] {
+margin-bottom: 15px;
+}
+
+.gesture-indicator {
+padding: 15px;
+border-radius: 8px;
+text-align: center;
+}
+
+.gesture-indicator.hidden {
+display: none;
+}
+
+.gesture-indicator.active-yes {
+background: #1a4d1a;
+border: 2px solid #00ff00;
+}
+
+.gesture-indicator.active-no {
+background: #4d1a1a;
+border: 2px solid #ff4444;
+}
+
+.indicator-value {
+font-size: 2.5rem;
+font-weight: bold;
+margin: 10px 0;
+}
+
+.gesture-indicator.active-yes .indicator-value {
+color: #00ff00;
+}
+
+.gesture-indicator.active-no .indicator-value {
+color: #ff4444;
+}
+
+.indicator-info {
+font-size: 0.85rem;
+color: #ccc;
+margin-top: 8px;
+}
