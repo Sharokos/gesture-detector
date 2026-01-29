@@ -21,13 +21,15 @@ def run_openpose(video_path, output_json_dir, openpose_dir, openpose_args=""):
     # Path to the .exe
     openpose_exe = openpose_dir / "bin" / "OpenPoseDemo.exe"
     total_frames = get_video_frame_count(video_path)
+    output_video_path = output_json_dir / "openpose_output.avi"  # or .mp4 if supported
     # Build command
     cmd = [
         str(openpose_exe),
         "--video", str(video_path),
         "--write_json", str(output_json_dir),
+        "--write_video", str(output_video_path),  # <--- Add this line
         "--display", "0",
-        "--render_pose", "0",
+        "--render_pose", "1",  # <--- Enable rendering of skeletons
     ] + openpose_args.split()
 
     # Launch OpenPose with cwd set to OpenPose directory
@@ -47,7 +49,7 @@ def run_openpose(video_path, output_json_dir, openpose_dir, openpose_args=""):
         time.sleep(0.5)
 
     pbar.close()
-    print(f"✅ Done. {json_count} frames processed.")
+    print(f"Done. {json_count} frames processed.")
 
 
 def get_video_frame_count(video_path):
