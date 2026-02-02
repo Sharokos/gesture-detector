@@ -1,5 +1,5 @@
-from body_part import BodyPart
-from frame import Frame
+from data_model.body_part import BodyPart
+from data_model.frame import Frame
 import math
 import numpy as np
 

@@ -1,6 +1,6 @@
 from pathlib import Path
 import json
-from person import PersonGesture
+from data_model.person import PersonGesture
 import plotly.graph_objs as go
 
 

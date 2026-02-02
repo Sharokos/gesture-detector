@@ -1,3 +1,4 @@
+from data_manager import input_parser
 from open_pose_handler import run_openpose
 from gesture_analysis import GestureAnalysis
 
@@ -9,10 +10,11 @@ from gesture_analysis import GestureAnalysis
 # )
 
 gesture_analysis = GestureAnalysis(
-    input_folder=r"D:\DATA\U_SAOM\Work\Misc\GD\gd\output_jsons")
+    input_folder=r"G:\OpenPose\detect_gestures\output_jsons")
 
 # Parse OpenPose data and build all features
-gesture_analysis.parse_openpose_and_populate_persons()  
+
+input_parser.parse_openpose_and_populate_persons(gesture_analysis=gesture_analysis)
 gesture_analysis.build_all_data()
 
 # Create sliding windows

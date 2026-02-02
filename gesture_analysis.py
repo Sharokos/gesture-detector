@@ -1,7 +1,7 @@
-from pathlib import Path
+
 import json
 import csv
-from person import PersonGesture
+from data_model.person import PersonGesture
 from sliding_window import SlidingWindow
 import pandas as pd
 import os
@@ -45,65 +45,10 @@ class GestureAnalysis:
         Build all necessary data for all persons.
         """
         for person in self.persons.values():
+            print(f"Building data for Person {person.person_id}")
             person.build_all_data()
 
-    def parse_openpose_and_populate_persons(self) -> dict:
-        """
-        Parses OpenPose JSONs and builds a dictionary of PersonGesture instances.
-
-        Returns:
-            Dict[int, PersonGesture]: Mapping from person_id to their tracked gesture data.
-        """
-        folder_path = Path(self.input_folder)
-        json_files = sorted(folder_path.glob("*.json"))
-
-        # Each file represents a frame, and each person in the frame has keypoints
-        for json_file in json_files:
-            with open(json_file, 'r') as f:
-                data = json.load(f)
-
-            frame_index = int(json_file.stem.split("_")[1])  # e.g., '000000000001'
-            self.number_of_frames += 1
-            # print(f"Processing frame {frame_index} from {json_file.name}")
-            for person_id, person in enumerate(data.get("people", [])):
-                # Ensure person object exists
-                if person_id not in self.persons:
-                    # print(f"Creating new PersonGesture for person_id {person_id}")
-                    self.persons[person_id] = PersonGesture(person_id, gesture_analysis=self)
-
-                # Extract and organize keypoints
-                body_data = person.get("pose_keypoints_2d", [])
-                left_hand_data = person.get("hand_left_keypoints_2d", [])
-                right_hand_data = person.get("hand_right_keypoints_2d", [])
-
-                keypoint_data = {
-                    "body": {
-                        self.COCO_PARTS[i]: (
-                            body_data[i * 3],
-                            body_data[i * 3 + 1],
-                            body_data[i * 3 + 2]
-                        )
-                        for i in range(len(self.COCO_PARTS))
-                    },
-                    "left_hand": {
-                        self.HAND_PARTS[i]: (
-                            left_hand_data[i * 3],
-                            left_hand_data[i * 3 + 1],
-                            left_hand_data[i * 3 + 2]
-                        )
-                        for i in range(len(self.HAND_PARTS)) if left_hand_data
-                    },
-                    "right_hand": {
-                        self.HAND_PARTS[i]: (
-                            right_hand_data[i * 3],
-                            right_hand_data[i * 3 + 1],
-                            right_hand_data[i * 3 + 2]
-                        )
-                        for i in range(len(self.HAND_PARTS)) if right_hand_data
-                    }
-                }
-
-                self.persons[person_id].add_frame_data(frame_index, keypoint_data)
+    
 
     def get_person_by_id(self,person_id):
         """
