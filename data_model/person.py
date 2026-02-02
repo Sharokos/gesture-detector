@@ -13,6 +13,7 @@ class PersonGesture:
         self.origin_part = origin
 
     def build_reference_data(self):
+        # Compute average origin and shoulder length across frames
         origins = []
         lengths = []
         for frame_idx in self.body["RShoulder"].frames:
@@ -21,7 +22,6 @@ class PersonGesture:
             if self.body[self.origin_part].frames[frame_idx].is_valid():
                 origins.append(self.get_origin(frame_idx))
                 
-
         self.avg_origin_x, self.avg_origin_y = np.median(origins, axis=0)
         self.avg_shoulder_length = np.median(lengths)
     

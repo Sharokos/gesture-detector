@@ -15,6 +15,7 @@ gesture_analysis = GestureAnalysis(
 # Parse OpenPose data and build all features
 
 input_parser.parse_openpose_and_populate_persons(gesture_analysis=gesture_analysis)
+# we have all data
 gesture_analysis.build_all_data()
 
 # Create sliding windows

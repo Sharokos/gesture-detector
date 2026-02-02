@@ -1,4 +1,7 @@
 import math
+import numpy as np
+
+from data_model.frame import Frame
 class BodyPart:
     def __init__(self, part_name, person_id,gesture_analysis=None):
         """
@@ -43,83 +46,141 @@ class BodyPart:
         return (frame.x_normalized, frame.y_normalized)
     def compute_velocity_magnitude(self, frame_idx):
         """
-        Compute velocity magnitude between the given frame and the previous frame.
-
+        Get the precomputed velocity magnitude for a frame. If internal arrays are dirty,
+        rebuild velocities and accelerations first. Returns 0.0 when value is not available.
         Args:
             frame_idx (int): Frame number.
         Returns:
-            Float: velocity magnitude, or 0 if not computable.
-        """ 
-        if frame_idx == 0 or frame_idx not in self.frames or (frame_idx - 1) not in self.frames:
-            return 0.0
-        x,y = self.get_normalized_coordinates(frame_idx)
-        x0,y0 = self.get_normalized_coordinates(frame_idx-1)
+            Float: velocity magnitude, or 0.0 if not computable.
+        """
+        # Ensure arrays up to date
+        if getattr(self, "_dirty", True):
+            self.build_velocities_and_accelerations()
 
-        dx = x - x0
-        dy = y - y0
-        return math.hypot(dx, dy)
+        if frame_idx < 0 or frame_idx >= len(self.velocities):
+            return 0.0
+
+        val = self.velocities[frame_idx]
+        try:
+            if np.isnan(val):
+                return 0.0
+        except Exception:
+            pass
+        return float(val)
+
     def get_velocity_vector(self, frame_idx):
         """
-        Returns (dx, dy) between current and previous frame.
-        If previous frame not available, returns (0.0, 0.0)
+        Returns (vx, vy) for the given frame index (velocity resolved in normalized units per second).
+        If not available, returns (0.0, 0.0).
         """
-        if frame_idx == 0 or frame_idx not in self.frames or (frame_idx - 1) not in self.frames:
-            return (0.0, 0.0)
-        x,y = self.get_normalized_coordinates(frame_idx)
-        x0,y0 = self.get_normalized_coordinates(frame_idx-1)
+        if getattr(self, "_dirty", True):
+            self.build_velocities_and_accelerations()
 
-        dx = x - x0
-        dy = y - y0
-        return (dx, dy)
+        if not hasattr(self, 'vx') or frame_idx < 0 or frame_idx >= len(self.vx):
+            return (0.0, 0.0)
+
+        vx = self.vx[frame_idx]
+        vy = self.vy[frame_idx]
+        
+        if np.isnan(vx) or np.isnan(vy):
+            return (0.0, 0.0)
+        return (float(vx), float(vy))
+
     def get_velocity_magnitude(self, frame_idx):
         """
-        Retrieve precomputed velocity magnitude for a specific frame index.
-
-        Args:
-            frame_idx (int): Frame number.
-        Returns:
-            Float: velocity magnitude, or 0 if not available.
+        Backwards-compatible wrapper to retrieve velocity magnitude as float.
         """
-        if frame_idx < len(self.velocities):
-            return self.velocities[frame_idx]
-        return 0.0
+        return self.compute_velocity_magnitude(frame_idx)
+
     def get_acceleration_magnitude(self, frame_idx):
         """
-        Retrieve precomputed acceleration magnitude for a specific frame index.
-
-        Args:
-            frame_idx (int): Frame number.
-        Returns:
-            Float: acceleration magnitude, or 0 if not available.   
+        Backwards-compatible wrapper to retrieve acceleration magnitude as float.
         """
-        if frame_idx < len(self.accelerations):
-            return self.accelerations[frame_idx]
-        return 0.0
+        if getattr(self, "_dirty", True):
+            self.build_velocities_and_accelerations()
+        if frame_idx < 0 or frame_idx >= len(self.accelerations):
+            return 0.0
+        val = self.accelerations[frame_idx]
+        if np.isnan(val):
+            return 0.0
+        return float(val)
+
     def compute_acceleration_magnitude(self, frame_idx):
         """
-        Compute acceleration magnitude between the given frame and the previous two frames.
+        Compute acceleration magnitude using precomputed arrays (kept for compatibility).
+        """
+        return self.get_acceleration_magnitude(frame_idx)
 
-        Args:
-            frame_idx (int): Frame number.
-        Returns:
-            Float: acceleration magnitude, or 0 if not computable.
+    def build_velocities_and_accelerations(self, fps=None):
         """
-        if frame_idx < 2 or frame_idx not in self.frames or (frame_idx - 1) not in self.frames or (frame_idx - 2) not in self.frames:
-            return 0.0
-        displacement_current = self.get_velocity_magnitude(frame_idx)
-        displacement_previous = self.get_velocity_magnitude(frame_idx - 1)
-    
-        # Acceleration is the change in displacement
-        return abs(displacement_current - displacement_previous)
-    def build_velocities_and_accelerations(self):
-        """
-        Build velocity and acceleration lists for the frames of this body part.
-        """
-        # THis should use the built in variable. THe no of frames should be saved as soon as all the frames have been added
-        num_frames = len(self.frames)
-        self.velocities = [self.compute_velocity_magnitude(i) for i in range(num_frames)]
+        Build velocity (vx, vy) and acceleration arrays for the frames of this body part.
 
-        self.accelerations = [self.compute_acceleration_magnitude(i) for i in range(num_frames)]  
+        Implementation notes:
+        - Uses frame indices as timestamps (frame_no / fps)
+        - Handles missing frames by using NaN placeholders
+        - Velocity is stored at the later frame index of an interval (i.e., velocity between i-1 and i is stored at i)
+        - Acceleration is stored at the later frame index of the velocity interval
+        """
+
+
+        fps = fps or getattr(self.gesture_analysis, 'frame_rate', getattr(Frame, 'FRAME_RATE', 24))
+
+        if not self.frames:
+            self.vx = np.array([], dtype=float)
+            self.vy = np.array([], dtype=float)
+            self.velocities = np.array([], dtype=float)
+            self.accelerations = np.array([], dtype=float)
+            self._dirty = False
+            return
+
+        max_frame = max(self.frames.keys())
+        n = max_frame + 1
+
+        x = np.full(n, np.nan, dtype=float)
+        y = np.full(n, np.nan, dtype=float)
+
+        for idx, f in self.frames.items():
+            x[idx] = f.x_normalized
+            y[idx] = f.y_normalized
+
+        valid = ~np.isnan(x) & ~np.isnan(y)
+        idxs = np.nonzero(valid)[0]
+
+        vx = np.full(n, np.nan, dtype=float)
+        vy = np.full(n, np.nan, dtype=float)
+        vel = np.full(n, np.nan, dtype=float)
+        acc = np.full(n, np.nan, dtype=float)
+
+        if len(idxs) >= 2:
+            # compute per-interval dt (in seconds)
+            dt = np.diff(idxs) / float(fps)
+            dx = np.diff(x[idxs])
+            dy = np.diff(y[idxs])
+
+            # velocity components per interval
+            vx_intervals = dx / dt
+            vy_intervals = dy / dt
+            mag_intervals = np.hypot(vx_intervals, vy_intervals)
+
+            # store velocity at the later frame index of each interval
+            vx[idxs[1:]] = vx_intervals
+            vy[idxs[1:]] = vy_intervals
+            vel[idxs[1:]] = mag_intervals
+
+            # acceleration between successive velocity intervals
+            if len(mag_intervals) >= 2:
+                dv = np.diff(mag_intervals)
+                dt2 = np.diff(idxs[1:]) / float(fps)
+                acc_vals = np.abs(dv / dt2)
+                acc[idxs[1:][1:]] = acc_vals
+
+        # Assign arrays
+        self.vx = vx
+        self.vy = vy
+        self.velocities = vel
+        self.accelerations = acc
+        self._dirty = False
+
     def update_normalized(self):
         person = self.gesture_analysis.get_person_by_id(self.person_id)
         for frame in self.frames.values():
@@ -128,9 +189,19 @@ class BodyPart:
                 person.avg_origin_y,
                 person.avg_shoulder_length
             )
-    def confident(self, frame_idx):
+        # Mark arrays as stale
+        self._dirty = True
+
+    def confident(self, frame_idx, confidence_threshold=0.5):
+        """
+        Returns whether the frame at frame_idx has a confidence score above the threshold.
+        """
         return True
-        return self.frames[frame_idx].is_valid(0.3)
+        frame = self.frames.get(frame_idx)
+        if frame is None:
+            return False
+        return frame.is_valid(confidence_threshold)
+
     def add_keyframe(self, frame):
         """
         Add or update a frame observation.
@@ -140,6 +211,8 @@ class BodyPart:
         """
         # store by frame_no for O(1) lookup
         self.frames[frame.frame_no] = frame
+        # Mark cached arrays as stale
+        self._dirty = True
 
     def __len__(self):
         return len(self.frames)
