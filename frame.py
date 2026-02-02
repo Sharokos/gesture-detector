@@ -38,3 +38,6 @@ class Frame:
         seconds = int(total_seconds % 60)
         milliseconds = int((total_seconds - int(total_seconds)) * 1000)
         return f"{hours:02}:{minutes:02}:{seconds:02}.{milliseconds:03}"
+    
+    def is_valid(self, confidence_threshold = 0.5):
+        return self.confidence is not None and self.confidence >= confidence_threshold

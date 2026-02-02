@@ -1,22 +1,21 @@
 from pathlib import Path
 import json
 from person import PersonGesture
-import matplotlib.pyplot as plt
 import plotly.graph_objs as go
 
 
 
-def get_person_by_id(person_id):
-    """
-    Retrieve a PersonGesture by their ID.
+# def get_person_by_id(person_id):
+#     """
+#     Retrieve a PersonGesture by their ID.
 
-    Args:
-        person_id (int): ID of the person to retrieve.
+#     Args:
+#         person_id (int): ID of the person to retrieve.
 
-    Returns:
-        PersonGesture or None: The PersonGesture object if found, else None.
-    """
-    return persons.get(person_id, None)
+#     Returns:
+#         PersonGesture or None: The PersonGesture object if found, else None.
+#     """
+#     return persons.get(person_id, None)
 # print(persons[1].body["RWrist"])
 # persons[1].body["RWrist"].display_frames()
 

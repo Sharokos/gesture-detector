@@ -9,7 +9,7 @@ from gesture_analysis import GestureAnalysis
 # )
 
 gesture_analysis = GestureAnalysis(
-    input_folder=r"G:\OpenPose\detect_gestures\output_jsons")
+    input_folder=r"D:\DATA\U_SAOM\Work\Misc\GD\gd\output_jsons")
 
 # Parse OpenPose data and build all features
 gesture_analysis.parse_openpose_and_populate_persons()  
@@ -29,8 +29,10 @@ print(f"Detected {len(gesture_analysis.persons)} persons")
 person_id = 0
 person = gesture_analysis.get_person_by_id(person_id)
 gesture_analysis.export_person_windows_to_csv(person_id,"testington.csv")
-gesture_analysis.plot_person_sliding_windows(person_id)
+# gesture_analysis.plot_person_sliding_windows(person_id)
+# gesture_analysis.export_debug_data_for_person(person_id)
 if person:
+    gesture_analysis.export_person_bodyparts_to_csv(person)
     # Get all windows for this person
     person_windows = [w for w in gesture_analysis.sliding_windows if w.person.person_id == person_id]
     
@@ -42,8 +44,7 @@ if person:
     # Merge adjacent gesture windows that are similar
     gesture_groups = gesture_analysis.merge_gesture_windows(
         gesture_windows,
-        max_temporal_gap=20,
-        feature_similarity_threshold=0.7
+        max_temporal_gap=25,
     )
     
     # Set frame rate if different from default 30 FPS

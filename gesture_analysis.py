@@ -3,12 +3,21 @@ import json
 import csv
 from person import PersonGesture
 from sliding_window import SlidingWindow
-
+import pandas as pd
+import os
 class GestureAnalysis:
     # COCO body parts minimal
     COCO_PARTS = [
         "Neck", "RShoulder", "RElbow", "RWrist", 
         "LShoulder", "LElbow", "LWrist", "MidHip", "RHip","LHip"
+    ]
+    HAND_PARTS = [
+        "Wrist",
+        "Thumb_1", "Thumb_2", "Thumb_3", "Thumb_4",
+        "Index_1", "Index_2", "Index_3", "Index_4",
+        "Middle_1", "Middle_2", "Middle_3", "Middle_4",
+        "Ring_1", "Ring_2", "Ring_3", "Ring_4",
+        "Pinky_1", "Pinky_2", "Pinky_3", "Pinky_4"
     ]
     def __init__(self, input_folder):
         self.input_folder = input_folder
@@ -64,8 +73,8 @@ class GestureAnalysis:
 
                 # Extract and organize keypoints
                 body_data = person.get("pose_keypoints_2d", [])
-                # left_hand_data = person.get("hand_left_keypoints_2d", [])
-                # right_hand_data = person.get("hand_right_keypoints_2d", [])
+                left_hand_data = person.get("hand_left_keypoints_2d", [])
+                right_hand_data = person.get("hand_right_keypoints_2d", [])
 
                 keypoint_data = {
                     "body": {
@@ -76,22 +85,22 @@ class GestureAnalysis:
                         )
                         for i in range(len(self.COCO_PARTS))
                     },
-                    # "left_hand": {
-                    #     HAND_PARTS[i]: (
-                    #         left_hand_data[i * 3],
-                    #         left_hand_data[i * 3 + 1],
-                    #         left_hand_data[i * 3 + 2]
-                    #     )
-                    #     for i in range(len(HAND_PARTS)) if left_hand_data
-                    # },
-                    # "right_hand": {
-                    #     HAND_PARTS[i]: (
-                    #         right_hand_data[i * 3],
-                    #         right_hand_data[i * 3 + 1],
-                    #         right_hand_data[i * 3 + 2]
-                    #     )
-                    #     for i in range(len(HAND_PARTS)) if right_hand_data
-                    # }
+                    "left_hand": {
+                        self.HAND_PARTS[i]: (
+                            left_hand_data[i * 3],
+                            left_hand_data[i * 3 + 1],
+                            left_hand_data[i * 3 + 2]
+                        )
+                        for i in range(len(self.HAND_PARTS)) if left_hand_data
+                    },
+                    "right_hand": {
+                        self.HAND_PARTS[i]: (
+                            right_hand_data[i * 3],
+                            right_hand_data[i * 3 + 1],
+                            right_hand_data[i * 3 + 2]
+                        )
+                        for i in range(len(self.HAND_PARTS)) if right_hand_data
+                    }
                 }
 
                 self.persons[person_id].add_frame_data(frame_index, keypoint_data)
@@ -210,70 +219,64 @@ class GestureAnalysis:
         print(f"\n{'='*80}\n")
     
     def export_person_windows_to_csv(self, person_id, output_file=None):
-        """
-        Export all sliding windows for a person to CSV with gesture classification.
-        
-        Creates a CSV file with columns: window_id, start_frame, end_frame, contains_gesture,
-        motion_energy, mean_velocity, motion_persistance_ratio, velocity_variance, 
-        distal_proximal_motion_ratio
-        
-        Args:
-            person_id (int): ID of the person to export.
-            output_file (str): Path to output CSV file. If None, uses 'person_{person_id}_windows.csv'.
-            motion_energy_threshold (float): Threshold for motion energy in gesture detection.
-            mean_velocity_threshold (float): Threshold for mean velocity in gesture detection.
-            motion_persistance_threshold (float): Threshold for motion persistance ratio.
-            distal_proximal_threshold (float): Threshold for distal/proximal motion ratio.
-        
-        Returns:
-            str: Path to the created CSV file.
-        """
         if output_file is None:
             output_file = f"person_{person_id}_windows.csv"
-        
+
         # Get all windows for this person
         person_windows = [w for w in self.sliding_windows if w.person.person_id == person_id]
-        
+
         if not person_windows:
             print(f"No windows found for person {person_id}")
             return None
-        
-        # Prepare data
+
+        # Prepare data as a list of dicts
         rows = []
         for window in person_windows:
-            # Build features if not already built
+            # Build features if not already done
             if not hasattr(window, 'motion_energy'):
                 window.build_features()
-            
-            # Determine if window contains gesture
-            is_gesture = window.contains_gesture()
-            
-            
+
             rows.append({
                 'window_id': window.id,
                 'start_frame': window.start_frame,
                 'end_frame': window.end_frame,
-                'contains_gesture': 'Yes' if is_gesture else 'No',
-                'motion_energy': f"{window.motion_energy:.4f}",
-                'mean_velocity': f"{window.mean_velocity:.4f}",
-                'motion_persistance_ratio': f"{window.motion_persistance_ratio:.4f}",
-                'velocity_variance': f"{window.velocity_variance:.4f}",
-                'distal_proximal_motion_ratio': f"{window.distal_proximal_motion_ratio:.4f}"
+                'contains_gesture': 'Yes' if window.contains_gesture() else 'No',
+                'motion_energy': window.motion_energy,
+                'rh_energy': window.rh_energy,
+                'lh_energy': window.lh_energy,
+                'mean_velocity': window.mean_velocity,
+                'motion_persistence': window.motion_persistence,
+                'velocity_variance': window.velocity_variance,
+                'distal_proximal_motion_ratio': window.distal_proximal_motion_ratio,
+                'directional_consistency': window.directional_consistency,
+                'max_angular_velocity': window.max_angular_velocity,
+                'max_angle': window.max_angle,
+                'acc': window.max_acceleration,
+                'score': window.score,
+                # 'le': window.angle_le,
+                # 're': window.angle_re,
+                # 'ls': window.angle_ls,
+                # 'rs': window.angle_rs,
+                # 'vle': window.vel_le,
+                # 'vre': window.vel_re,
+                # 'vls': window.vel_ls,
+                # 'vrs': window.vel_rs,
             })
-        
-        # Write to CSV
-        csv_columns = [
-            'window_id', 'start_frame', 'end_frame', 'contains_gesture',
-            'motion_energy', 'mean_velocity', 'motion_persistance_ratio',
-            'velocity_variance', 'distal_proximal_motion_ratio'
+
+        # Convert to pandas DataFrame
+        df = pd.DataFrame(rows)
+
+        # Optional: round numeric columns for readability
+        numeric_cols = [
+            'motion_energy','rh_energy','lh_energy', 'mean_velocity', 'motion_persistence',
+            'velocity_variance', 'distal_proximal_motion_ratio', 'directional_consistency','max_angle','max_angular_velocity','score','acc'
         ]
-        
-        with open(output_file, 'w', newline='') as csvfile:
-            writer = csv.DictWriter(csvfile, fieldnames=csv_columns)
-            writer.writeheader()
-            writer.writerows(rows)
-        
-        print(f"\nExported {len(rows)} windows to: {output_file}")
+        df[numeric_cols] = df[numeric_cols].round(4)
+
+        # Export to CSV
+        df.to_csv(output_file, index=False)
+
+        print(f"\nExported {len(df)} windows to: {output_file}")
         return output_file
     
     def export_gesture_groups_to_json(self, gesture_groups, output_file=None):
@@ -313,27 +316,6 @@ class GestureAnalysis:
         return output_file
     
     def plot_person_sliding_windows(self, person_id, output_html=None):
-        """
-        Create an interactive Plotly plot with all parameters of a person's sliding windows.
-        
-        Creates a multi-line plot with all sliding window parameters on the same graph.
-        X-axis represents the start frame of each window.
-        Y-axis contains normalized parameter values.
-        
-        Parameters plotted:
-        - Motion Energy
-        - Mean Velocity
-        - Motion Persistance Ratio
-        - Velocity Variance
-        - Distal Proximal Motion Ratio
-        
-        Args:
-            person_id (int): ID of the person to plot.
-            output_html (str): Path to output HTML file. If None, uses 'person_{person_id}_plot.html'.
-        
-        Returns:
-            str: Path to the created HTML file.
-        """
         try:
             import plotly.graph_objects as go
         except ImportError:
@@ -362,9 +344,16 @@ class GestureAnalysis:
         start_frames = [w.start_frame for w in person_windows]
         motion_energy = [w.motion_energy for w in person_windows]
         mean_velocity = [w.mean_velocity for w in person_windows]
-        motion_persistance = [w.motion_persistance_ratio for w in person_windows]
+        motion_persistence = [w.motion_persistence for w in person_windows]
         velocity_variance = [w.velocity_variance for w in person_windows]
         distal_proximal = [w.distal_proximal_motion_ratio for w in person_windows]
+        directional_consistency = [w.directional_consistency for w in person_windows]
+        max_angle = [w.max_angle for w in person_windows]
+        max_angular_veloctiy = [w.max_angular_velocity for w in person_windows]
+        score = [w.score for w in person_windows]
+        acc = [w.max_acceleration for w in person_windows]
+        r_hand_energy = [w.rh_energy for w in person_windows]
+        l_hand_energy = [w.lh_energy for w in person_windows]
         
         # Create figure
         fig = go.Figure()
@@ -376,6 +365,30 @@ class GestureAnalysis:
             mode='lines+markers',
             name='Motion Energy',
             line=dict(color='#1f77b4', width=2),
+            marker=dict(size=6)
+        )) 
+        fig.add_trace(go.Scatter(
+            x=start_frames,
+            y=acc,
+            mode='lines+markers',
+            name='Max acceleration',
+            line=dict(color="#733f96", width=2),
+            marker=dict(size=6)
+        ))
+        fig.add_trace(go.Scatter(
+            x=start_frames,
+            y=r_hand_energy,
+            mode='lines+markers',
+            name='Right hand energy',
+            line=dict(color="#00ff55", width=2),
+            marker=dict(size=6)
+        ))
+        fig.add_trace(go.Scatter(
+            x=start_frames,
+            y=l_hand_energy,
+            mode='lines+markers',
+            name='Left hand energy',
+            line=dict(color="#ff7dff", width=2),
             marker=dict(size=6)
         ))
         
@@ -390,9 +403,9 @@ class GestureAnalysis:
         
         fig.add_trace(go.Scatter(
             x=start_frames,
-            y=motion_persistance,
+            y=motion_persistence,
             mode='lines+markers',
-            name='Motion Persistance Ratio',
+            name='Motion persistence Ratio',
             line=dict(color='#2ca02c', width=2),
             marker=dict(size=6)
         ))
@@ -414,7 +427,38 @@ class GestureAnalysis:
             line=dict(color='#9467bd', width=2),
             marker=dict(size=6)
         ))
-        
+        fig.add_trace(go.Scatter(
+            x=start_frames,
+            y=directional_consistency,
+            mode='lines+markers',
+            name='Directional consistency',
+            line=dict(color="#eeff00", width=2),
+            marker=dict(size=6)
+        ))
+        fig.add_trace(go.Scatter(
+            x=start_frames,
+            y=max_angle,
+            mode='lines+markers',
+            name='Max angle',
+            line=dict(color="#00FFDD", width=2),
+            marker=dict(size=6)
+        ))
+        fig.add_trace(go.Scatter(
+            x=start_frames,
+            y=max_angular_veloctiy,
+            mode='lines+markers',
+            name='Max angular velocity',
+            line=dict(color="#df4ee4", width=2),
+            marker=dict(size=6)
+        ))
+        fig.add_trace(go.Scatter(
+            x=start_frames,
+            y=score,
+            mode='lines+markers',
+            name='Score',
+            line=dict(color="#1100ff", width=2),
+            marker=dict(size=6)
+        ))
         # Update layout
         fig.update_layout(
             title=f'Sliding Window Parameters - Person {person_id}',
@@ -440,3 +484,94 @@ class GestureAnalysis:
         print(f"Number of windows: {len(person_windows)}")
         
         return output_html
+    
+
+    def export_debug_data_for_person(self, person_id):
+        person = self.get_person_by_id(person_id)
+        output_path = "debug_person"
+        rows = []
+
+        for part_name, body_part in person.body.items():
+            if part_name not in SlidingWindow.INTEREST_PARTS:
+                continue
+
+            for frame_idx, frame in body_part.frames.items():
+                rows.append({
+                    "person_id": person_id,
+                    "body_part": part_name,
+                    "frame_idx": frame_idx,
+                    "X": frame.x,
+                    "Y": frame.y,
+                    "X_normalized": frame.x_normalized,
+                    "Y_normalized": frame.y_normalized,
+                    "confidence": frame.confidence,
+                })
+        for part_name, body_part in person.left_hand.items():
+            for frame_idx, frame in body_part.frames.items():
+                rows.append({
+                    "person_id": person_id,
+                    "body_part": part_name,
+                    "frame_idx": frame_idx,
+                    "X": frame.x,
+                    "Y": frame.y,
+                    "X_normalized": frame.x_normalized,
+                    "Y_normalized": frame.y_normalized,
+                    "confidence": frame.confidence,
+                })
+        for part_name, body_part in person.right_hand.items():
+            for frame_idx, frame in body_part.frames.items():
+                rows.append({
+                    "person_id": person_id,
+                    "body_part": part_name,
+                    "frame_idx": frame_idx,
+                    "X": frame.x,
+                    "Y": frame.y,
+                    "X_normalized": frame.x_normalized,
+                    "Y_normalized": frame.y_normalized,
+                    "confidence": frame.confidence,
+                })
+        df = pd.DataFrame(rows)
+
+        # Export reminders:
+        df.to_csv(f"{output_path}.csv", index=False)
+        # df.to_excel(f"{output_path}.xlsx", index=False)
+
+        return df
+
+                
+    def export_person_bodyparts_to_csv(self,person, output_dir="bodypart_csvs"):
+
+        os.makedirs(output_dir, exist_ok=True)
+        csv_files = []
+
+        for part_name, body_part in person.body.items():
+            rows = []
+            for frame_idx, frame in body_part.frames.items():
+                vx, vy = body_part.get_velocity_vector(frame_idx)
+                v_mag =  body_part.get_velocity_magnitude(frame_idx)
+                rows.append({
+                    "frame_idx": frame_idx,
+                    "x": frame.x,
+                    "y": frame.y,
+                    "x_normalized": frame.x_normalized,
+                    "y_normalized": frame.y_normalized,
+                    "vx": vx,
+                    "vy": vy,
+                    "velocity_magnitude": v_mag,
+                    "confidence": frame.confidence
+                })
+
+            # Create DataFrame
+            df = pd.DataFrame(rows)
+
+            # Optional: sort by frame_idx to ensure order
+            df = df.sort_values("frame_idx").reset_index(drop=True)
+
+            # Save CSV
+            csv_file = os.path.join(output_dir, f"{person.person_id}_{part_name}.csv")
+            df.to_csv(csv_file, index=False)
+            csv_files.append(csv_file)
+
+            print(f"Exported {len(df)} frames for {part_name} -> {csv_file}")
+
+        return csv_files
