@@ -1,61 +1,38 @@
-from data_manager import input_parser
+
 from open_pose_handler import run_openpose
-from gesture_analysis import GestureAnalysis
+from gesture_manager.gesture_analysis import GestureAnalysis
+from data_manager.debugger import export_person_bodyparts_data, export_person_features_data
+from data_manager.plotter import plot_person_sliding_windows, plot_body_part_features, plot_normalization_data, plot_person_bodypart_features
+from config import DEBUG_DIR, JSON_DIR, OPEN_POSE_DIR, GESTURE_DETECTION, GENERATE_JSONS, RESOLUTION, VIDEO_LOCATION
 
-# run_openpose(
-#     video_path=r"G:\OpenPose\detect_gestures\video.mp4",
-#     output_json_dir=r"G:\OpenPose\detect_gestures\output_jsons",
-#     openpose_dir=r"G:/OpenPose/openpose/",
-#     openpose_args="--hand --net_resolution 176x-1"
-# )
+DEBUG_FLAG = False
+DEEP_DEBUG = True
+HAND_DEBUG = False
 
-gesture_analysis = GestureAnalysis(
-    input_folder=r"G:\OpenPose\detect_gestures\output_jsons")
-
-# Parse OpenPose data and build all features
-
-input_parser.parse_openpose_and_populate_persons(gesture_analysis=gesture_analysis)
-# we have all data
-gesture_analysis.build_all_data()
-
-# Create sliding windows
-gesture_analysis.create_sliding_windows()
-
-# Build features for all sliding windows
-for window in gesture_analysis.sliding_windows:
-    window.build_features()
-
-print(f"Created {len(gesture_analysis.sliding_windows)} sliding windows")
-print(f"Detected {len(gesture_analysis.persons)} persons")
-
-# Process gestures for person 0
-person_id = 0
-person = gesture_analysis.get_person_by_id(person_id)
-gesture_analysis.export_person_windows_to_csv(person_id,"testington.csv")
-# gesture_analysis.plot_person_sliding_windows(person_id)
-# gesture_analysis.export_debug_data_for_person(person_id)
-if person:
-    gesture_analysis.export_person_bodyparts_to_csv(person)
-    # Get all windows for this person
-    person_windows = [w for w in gesture_analysis.sliding_windows if w.person.person_id == person_id]
-    
-    # Detect gestures (windows that contain significant motion)
-    gesture_windows = [w for w in person_windows if w.contains_gesture()]
-    
-    print(f"\nPerson {person_id}: Detected {len(gesture_windows)} gesture windows")
-    
-    # Merge adjacent gesture windows that are similar
-    gesture_groups = gesture_analysis.merge_gesture_windows(
-        gesture_windows,
-        max_temporal_gap=25,
+if GENERATE_JSONS:
+    run_openpose(
+        video_path=VIDEO_LOCATION,
+        output_json_dir=JSON_DIR,
+        openpose_dir=OPEN_POSE_DIR,
+        openpose_args=f"--hand --net_resolution {RESOLUTION}"
     )
-    
-    # Set frame rate if different from default 30 FPS
-    gesture_analysis.frame_rate = 24  # Adjust to your video's FPS
-    
-    # Print gesture summary with timestamps
-    gesture_analysis.print_gesture_summary(gesture_groups)
-    
-    # Export to JSON for video helper
-    gesture_analysis.export_gesture_groups_to_json(gesture_groups, "gestures.json")
-    
+if GESTURE_DETECTION:
+    # get frame count
+    gesture_analysis = GestureAnalysis(
+        input_folder=JSON_DIR) 
+
+    gesture_analysis.execute()
+    # Process gestures for person 0
+    person_id = 0
+    gesture_analysis.determine_gestures_for_person(person_id)
+    gesture_analysis.export_windows_to_csv(DEBUG_DIR +"/" + "windows.csv")
+    if DEBUG_FLAG:
+        export_person_bodyparts_data(gesture_analysis, person_id, HAND_DEBUG)
+        export_person_features_data(gesture_analysis, person_id, HAND_DEBUG)
+        plot_person_sliding_windows(gesture_analysis, person_id)
+        plot_normalization_data(gesture_analysis, person_id)
+        plot_person_bodypart_features(gesture_analysis, person_id)
+        if DEEP_DEBUG:
+            plot_body_part_features(gesture_analysis, person_id)
+
+        

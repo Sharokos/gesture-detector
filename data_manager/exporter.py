@@ -1,4 +1,5 @@
 import json
+
 def export_gesture_groups_to_json(gesture_analysis, gesture_groups, output_file=None):
         """
         Export gesture groups to JSON format compatible with the video helper.
@@ -14,8 +15,12 @@ def export_gesture_groups_to_json(gesture_analysis, gesture_groups, output_file=
             output_file = "gestures.json"
         
         gestures = []
+        # TODO: better to calculate the start/end time for each window at creation time so you won't pass the gesture analysis obj here
         for gesture_id, group in enumerate(gesture_groups):
-            start_frame = group[0].start_frame
+
+            start_frame = (group[0].start_frame + group[0].end_frame)//2
+            
+            # start_frame = group[0].start_frame
             end_frame = group[-1].end_frame
             
             # Calculate timestamps (in seconds)

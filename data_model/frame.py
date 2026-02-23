@@ -1,5 +1,4 @@
 class Frame:
-    FRAME_RATE = 24
     def __init__(self, frame_no,x, y, confidence):
         """
         Initialize a Frame to track a single keypoint frame.
@@ -13,7 +12,8 @@ class Frame:
         self.confidence = confidence
         self.x_normalized = 0
         self.y_normalized = 0
-
+    def add_body_part_reference(self,bodyPart):
+        self.body_part = bodyPart
     def __repr__(self):
         return (f"Frame: {self.frame_no}, Position: ({self.x:.2f}, {self.y:.2f}), Confidence: {self.confidence:.2f}, timestamp: {self.get_timestamp()}")
     
@@ -32,7 +32,7 @@ class Frame:
         """
         Returns the timestamp for this frame in HH:MM:SS.mmm format.
         """
-        total_seconds = self.frame_no / self.FRAME_RATE
+        total_seconds = self.frame_no / self.body_part.gesture_analysis.frame_rate
         hours = int(total_seconds // 3600)
         minutes = int((total_seconds % 3600) // 60)
         seconds = int(total_seconds % 60)

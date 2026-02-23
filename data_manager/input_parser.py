@@ -3,9 +3,9 @@ import json
 
 from config import COCO_PARTS, HAND_PARTS
 from data_model.person import PersonGesture
-from gesture_analysis import GestureAnalysis
 
-def parse_openpose_and_populate_persons(gesture_analysis: GestureAnalysis=None):
+
+def parse_openpose_and_populate_persons(gesture_analysis=None):
         """
         Parses OpenPose JSONs and builds a dictionary of PersonGesture instances.
 
