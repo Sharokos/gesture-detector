@@ -2,10 +2,8 @@
 
 # REMOVING CONFIG PARAMETERS MIGHT LEAD TO UNEXPECTED BEHAVIOR. DON'T!
 
-JSON_DIR = r"G:\OpenPose\detect_gestures\output_jsons_highres"
-DEBUG_DIR = "OutputDebugData"
 OPEN_POSE_DIR = r"G:\OpenPose\openpose"
-VIDEO_LOCATION = r"G:\OpenPose\detect_gestures\video.mp4"
+INPUT_DIR = r"D:\DATA\U_SAOM\Work\Misc\GD\gd2\gesture-detector\INPUT_VIDEOS"
 
 # 176x-1 → very fast
 # 368x-1 → good balance

@@ -1,11 +1,10 @@
-from config import DEBUG_DIR
 import plotly.graph_objects as go
 import os
 import itertools
 
-def plot_person_sliding_windows(gesture_analysis, person_id, output_html=None):
-    if output_html is None:
-        output_html = f"{DEBUG_DIR}/person_{person_id}_plot.html"
+def plot_person_sliding_windows(gesture_analysis, person_id, output_dir=None):
+
+    output_html = os.path.join(output_dir,f"person_{person_id}_plot.html")
 
     # Get all windows for this person
     person_windows = gesture_analysis.get_windows_for_person(person_id)
@@ -116,7 +115,7 @@ def plot_person_sliding_windows(gesture_analysis, person_id, output_html=None):
     return output_html
 
 
-def plot_body_part_features(gesture_analysis, person_id):
+def plot_body_part_features(gesture_analysis, person_id,output_dir=None):
     """
     Plots features for all body parts of a person.
 
@@ -130,7 +129,9 @@ def plot_body_part_features(gesture_analysis, person_id):
     person = gesture_analysis.get_person_by_id(person_id)
     if person is None:
         return
-    output_dir = DEBUG_DIR + "/" + "plots"
+    
+    output_dir = os.path.join(output_dir,"plots")
+
     for part_name, body_part in person.body.items():
         frame_indices = sorted(body_part.frames.keys())
 
@@ -200,19 +201,16 @@ def plot_body_part_features(gesture_analysis, person_id):
         )
 
         if output_dir:
-            import os
             os.makedirs(output_dir, exist_ok=True)
             filename = os.path.join(output_dir, f"{person.person_id}_{part_name}.html")
             fig.write_html(filename)
 
 
-def plot_normalization_data(gesture_analysis, person_id):
+def plot_normalization_data(gesture_analysis, person_id,output_dir=None):
 
     person = gesture_analysis.get_person_by_id(person_id)
     if person is None:
         return
-
-    output_dir = DEBUG_DIR
 
     # Initialize lists outside the loop
     x = []
@@ -256,8 +254,9 @@ def plot_normalization_data(gesture_analysis, person_id):
 def plot_person_bodypart_features(
     gesture_analysis,
     person_id,
+    output_dir=None,
     ):
-    output_dir = DEBUG_DIR + "/" + "plots_features"
+    output_dir = os.path.join(output_dir,"plots_features")
     os.makedirs(output_dir, exist_ok=True)
 
     # -------------------------

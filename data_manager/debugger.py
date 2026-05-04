@@ -2,8 +2,7 @@ import pandas as pd
 import os
 import re
 from collections import defaultdict
-from pathlib import Path
-from config import DEBUG_DIR,BASELINE_WINDOW
+
 FEATURE_COLUMNS = [
     "motion_energy",
     "mean_velocity",
@@ -35,14 +34,12 @@ def _safe_sheet_name(name):
         # Excel sheet names must be <=31 chars and cannot contain: : \/ ? * [ ]
         name = re.sub(r'[:\\\/?\*\[\]]', '_', name)
         return name[:31]
-def export_person_features_data(gesture_analysis, person_id, deep_debug):
-
-    output_dir = DEBUG_DIR
-    output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-
+def export_person_features_data(gesture_analysis, person_id, deep_debug, output_dir=None,):
+    output_dir = os.path.join(output_dir,"feature_data")
+    os.makedirs(output_dir, exist_ok=True)
     person_windows = gesture_analysis.get_windows_for_person(person_id)
-
+    if len(person_windows) == 0:
+        return
     body_data = defaultdict(list)
     left_hand_data = defaultdict(list)
     right_hand_data = defaultdict(list)
@@ -93,7 +90,7 @@ def export_person_features_data(gesture_analysis, person_id, deep_debug):
         # ----------------------------
         # Write BODY excel
         # ----------------------------
-        with pd.ExcelWriter(output_dir / "body.xlsx", engine="openpyxl") as writer:
+        with pd.ExcelWriter(os.path.join(output_dir,"body.xlsx"), engine="openpyxl") as writer:
             for part, rows in body_data.items():
                 pd.DataFrame(rows).to_excel(
                     writer, sheet_name=_safe_sheet_name(part), index=False
@@ -102,7 +99,7 @@ def export_person_features_data(gesture_analysis, person_id, deep_debug):
         # ----------------------------
         # Write LEFT HAND excel
         # ----------------------------
-        with pd.ExcelWriter(output_dir / "left_hand.xlsx", engine="openpyxl") as writer:
+        with pd.ExcelWriter(os.path.join(output_dir,"left_hand.xlsx"), engine="openpyxl") as writer:
             overview_rows = []
 
             for part, rows in left_hand_data.items():
@@ -125,7 +122,7 @@ def export_person_features_data(gesture_analysis, person_id, deep_debug):
         # ----------------------------
         # Write RIGHT HAND excel
         # ----------------------------
-        with pd.ExcelWriter(output_dir / "right_hand.xlsx", engine="openpyxl") as writer:
+        with pd.ExcelWriter(os.path.join(output_dir,"right_hand.xlsx"), engine="openpyxl") as writer:
             overview_rows = []
 
             for part, rows in right_hand_data.items():
@@ -149,13 +146,13 @@ def export_person_features_data(gesture_analysis, person_id, deep_debug):
     # Write FEATURES MANAGER overview
     # ----------------------------
     pd.DataFrame(manager_rows).to_excel(
-        output_dir / "overview.xlsx",
+        os.path.join(output_dir,"overview.xlsx"),
         index=False
     )
  
                 
-def export_person_bodyparts_data(gesture_analysis, person_id, deep_debug, output_dir="bodypart_csvs", ):
-    output_dir = DEBUG_DIR  + "/" + output_dir
+def export_person_bodyparts_data(gesture_analysis, person_id, deep_debug, output_dir=None, ):
+    output_dir = os.path.join(output_dir,"bodypart_csvs")
     os.makedirs(output_dir, exist_ok=True)
     saved_files = []
     person = gesture_analysis.get_person_by_id(person_id)
