@@ -5,6 +5,8 @@ import numbers
 from math_utility import remove_outliers_mad
 from config import TEMPORAL_GAP
 import csv
+import os
+
 class GestureAnalysis:
     # COCO body parts minimal
     COCO_PARTS = [
@@ -59,7 +61,7 @@ class GestureAnalysis:
             print(f"Building data for Person {person.person_id}")
             person.build_all_data()
     
-    def determine_gestures_for_person(self,person_id):
+    def determine_gestures_for_person(self,person_id,output_path = None):
         self.clean_features_outliers_for_person(person_id)
         # Keep only the sliding windows of that person
         person_windows = self.get_windows_for_person(person_id)
@@ -74,7 +76,7 @@ class GestureAnalysis:
         )
         self.print_gesture_summary(gesture_groups)
         # Export to JSON for video helper
-        export_gesture_groups_to_json(self,gesture_groups, "gestures.json")
+        export_gesture_groups_to_json(self,gesture_groups, os.path.join(output_path , "gestures.json"))
 
     def get_windows_for_person(self,person_id):
         person_windows = []
