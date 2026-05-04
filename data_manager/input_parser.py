@@ -21,7 +21,7 @@ def parse_openpose_and_populate_persons(gesture_analysis=None):
             with open(json_file, 'r') as f:
                 data = json.load(f)
 
-            frame_index = int(json_file.stem.split("_")[1])  # e.g., '000000000001'
+            frame_index = int(json_file.stem.split("_")[-2])  # e.g., '000000000001'
             number_of_frames += 1
             for person_id, person_data in enumerate(data.get("people", [])):
                 # Ensure person object exists
