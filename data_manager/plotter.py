@@ -21,12 +21,17 @@ def plot_person_sliding_windows(gesture_analysis, person_id, output_dir=None):
     # -------------------------
     fm_params = [
         "velocity",
-        "velocity_variance",
+        # "velocity_variance",
         "max_energy",
-        "motion_persistance",
-        'max_angular',
+        # "motion_persistance",
+        # 'max_angular',
         # "left_hand_energy",
         # "right_hand_energy",
+        # "max_motion_saliency",
+        # "max_burstiness",
+        # "max_directional_consistency",
+        # "max_direction_changes",
+        # "max_path_efficiency",
         # "l_elbow_angle",
         # "r_elbow_angle",
         # "l_shoulder_angle",
@@ -35,7 +40,7 @@ def plot_person_sliding_windows(gesture_analysis, person_id, output_dir=None):
         # "r_elbow_angular_velocity",
         # "l_shoulder_angular_velocity",
         # "r_shoulder_angular_velocity",
-        "distal_proximal_ratio",
+        # "distal_proximal_ratio",
         "max_acceleration",
         "mean_baseline_distance"
     ]
@@ -47,12 +52,18 @@ def plot_person_sliding_windows(gesture_analysis, person_id, output_dir=None):
     data["window_id"] = []
     data["start_frame"] = []
     data["score"] = []
+    data["score_threshold"] = []
+    data["distance_threshold"] = []
+    data["is_gesture"] = []
 
     for w in person_windows:
         fm = w.features_manager
         data["window_id"].append(w.id)
         data["start_frame"].append(w.start_frame)
         data["score"].append(w.score)
+        data["score_threshold"].append(w.threshold)
+        data["distance_threshold"].append(w.distance_threhsold)
+        data["is_gesture"].append(w.is_gesture)
         for param in fm_params:
             data[param].append(getattr(fm, param, None))
 
@@ -85,6 +96,30 @@ def plot_person_sliding_windows(gesture_analysis, person_id, output_dir=None):
             name='Score',
             line=dict(color=next(color_cycle), width=2),
             marker=dict(size=6)
+        ))
+    fig.add_trace(go.Scatter(
+            x=data["start_frame"],
+            y=data['score_threshold'],
+            mode='lines+markers',
+            name='Gesture threshold',
+            line=dict(color=next(color_cycle), width=2),
+            marker=dict(size=8)
+        ))
+    fig.add_trace(go.Scatter(
+            x=data["start_frame"],
+            y=data['distance_threshold'],
+            mode='lines+markers',
+            name='Distance threshold',
+            line=dict(color=next(color_cycle), width=2),
+            marker=dict(size=8)
+    ))
+    fig.add_trace(go.Scatter(
+            x=data["start_frame"],
+            y=data['is_gesture'],
+            mode='lines+markers',
+            name='Gesture detected',
+            line=dict(color=next(color_cycle), width=2),
+            marker=dict(size=8)
         ))
     # -------------------------
     # Layout

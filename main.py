@@ -9,12 +9,22 @@ from data_manager.plotter import (
     plot_person_bodypart_features
 )
 from config import OPEN_POSE_DIR, GESTURE_DETECTION, GENERATE_JSONS, RESOLUTION, INPUT_DIR
+from data_convertor import eaf_to_json, json_to_eaf
+eaf_path = r"D:\DATA\U_SAOM\Work\Misc\GD\Output_Json_Mai\EAF\Emotional_LA_Pianist_L2_EM_AV_FS_P31.eaf"
+json_output = r"D:\DATA\U_SAOM\Work\Misc\GD\Output_Json_Mai\EAF\Emotional_LA_Pianist_L2_EM_AV_FS_P31.json"
+json_path =r"D:\DATA\U_SAOM\Work\Misc\GD\Output_Json_Mai\EAF\Emotional_LA_Pianist_L2_EM_AV_FS_P31.json"
+eaf_output = r"D:\DATA\U_SAOM\Work\Misc\GD\Output_Json_Mai\EAF\Emotional_LA_Pianist_L2_EM_AV_FS_P31_test.eaf"
+
+# eaf_to_json(eaf_path, json_path)
+# exit()
 
 DEBUG_FLAG = True
 DEEP_DEBUG = True
-HAND_DEBUG = True
+HAND_DEBUG = False
 
 INPUT_ROOT = INPUT_DIR
+
+
 
 OUTPUT_ROOT = os.path.join(
     os.path.dirname(INPUT_ROOT),

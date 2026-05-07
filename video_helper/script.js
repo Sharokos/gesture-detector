@@ -15,6 +15,10 @@ const gestureJsonInput = document.getElementById('gestureJsonInput');
 const gestureIndicator = document.getElementById('gestureIndicator');
 const indicatorValue = document.getElementById('indicatorValue');
 const indicatorInfo = document.getElementById('indicatorInfo');
+const gestureJsonInput2 = document.getElementById('gestureJsonInput_code');
+const gestureIndicator2 = document.getElementById('gestureIndicator_code');
+const indicatorValue2 = document.getElementById('indicatorValue_code');
+const indicatorInfo2 = document.getElementById('indicatorInfo_code');
 
 
 let detectedFPS = 0;
@@ -89,7 +93,8 @@ stepForwardBtn.onclick = () => step(1);
 
 video.addEventListener('timeupdate', () => {
 updateReadout(video.currentTime);
-updateGestureIndicator(video.currentTime);
+handler1.update(video.currentTime);
+handler2.update(video.currentTime);
 });
 
 
@@ -275,66 +280,95 @@ saveTimestamp();
 });
 
 
-// Gesture JSON handling
-gestureJsonInput.addEventListener('change', (e) => {
-const file = e.target.files[0];
-if (file) {
-const reader = new FileReader();
-reader.onload = (event) => {
-try {
-const data = JSON.parse(event.target.result);
-// Support both array format and clips format
-if (Array.isArray(data)) {
-gestureData = data;
-} else if (data.clips && Array.isArray(data.clips)) {
-gestureData = data.clips;
-} else if (data.gestures && Array.isArray(data.gestures)) {
-gestureData = data.gestures;
-} else {
-throw new Error('Invalid JSON format');
+function createGestureHandler({
+    inputEl,
+    indicatorEl,
+    valueEl,
+    infoEl
+}) {
+    let gestureData = [];
+
+    inputEl.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (file) {
+            const reader = new FileReader();
+
+            reader.onload = (event) => {
+                try {
+                    const data = JSON.parse(event.target.result);
+
+                    if (Array.isArray(data)) {
+                        gestureData = data;
+                    } else if (data.clips && Array.isArray(data.clips)) {
+                        gestureData = data.clips;
+                    } else if (data.gestures && Array.isArray(data.gestures)) {
+                        gestureData = data.gestures;
+                    } else {
+                        throw new Error('Invalid JSON format');
+                    }
+
+                    console.log(`Loaded ${gestureData.length} gestures`);
+                    indicatorEl.classList.remove('hidden');
+                    updateIndicator(video.currentTime);
+                } catch (error) {
+                    alert('Error loading gesture JSON: ' + error.message);
+                    gestureData = [];
+                }
+            };
+
+            reader.readAsText(file);
+        }
+    });
+
+    function updateIndicator(currentTime) {
+        if (gestureData.length === 0) return;
+
+        let matchingGesture = null;
+
+        for (const gesture of gestureData) {
+            const startTime = gesture.start_time || gesture.start;
+            const endTime = gesture.end_time || gesture.end;
+
+            if (currentTime >= startTime && currentTime <= endTime) {
+                matchingGesture = gesture;
+                break;
+            }
+        }
+
+        if (matchingGesture) {
+            valueEl.textContent = 'YES';
+            indicatorEl.classList.remove('active-no');
+            indicatorEl.classList.add('active-yes');
+
+            const gestureName = matchingGesture.gesture || matchingGesture.clip_id || 'Gesture';
+            const duration =
+                (matchingGesture.end_time || matchingGesture.end) -
+                (matchingGesture.start_time || matchingGesture.start);
+
+            infoEl.textContent = `${gestureName} (${duration.toFixed(2)}s)`;
+        } else {
+            valueEl.textContent = 'NO';
+            indicatorEl.classList.remove('active-yes');
+            indicatorEl.classList.add('active-no');
+            infoEl.textContent = 'No gesture at current timestamp';
+        }
+    }
+
+    return {
+        update: updateIndicator
+    };
 }
-console.log(`Loaded ${gestureData.length} gestures`);
-gestureIndicator.classList.remove('hidden');
-updateGestureIndicator(video.currentTime);
-} catch (error) {
-alert('Error loading gesture JSON: ' + error.message);
-gestureData = [];
-}
-};
-reader.readAsText(file);
-}
+
+const handler1 = createGestureHandler({
+    inputEl: gestureJsonInput,
+    indicatorEl: gestureIndicator,
+    valueEl: indicatorValue,
+    infoEl: indicatorInfo
 });
 
-
-function updateGestureIndicator(currentTime) {
-if (gestureData.length === 0) {
-return;
-}
-
-// Find if current time falls within any gesture
-let matchingGesture = null;
-for (const gesture of gestureData) {
-const startTime = gesture.start_time || gesture.start;
-const endTime = gesture.end_time || gesture.end;
-
-if (currentTime >= startTime && currentTime <= endTime) {
-matchingGesture = gesture;
-break;
-}
-}
-
-if (matchingGesture) {
-indicatorValue.textContent = 'YES';
-gestureIndicator.classList.remove('active-no');
-gestureIndicator.classList.add('active-yes');
-
-const gestureName = matchingGesture.gesture || matchingGesture.clip_id || 'Gesture';
-const duration = (matchingGesture.end_time || matchingGesture.end) - (matchingGesture.start_time || matchingGesture.start);
-indicatorInfo.textContent = `${gestureName} (${duration.toFixed(2)}s)`;
-} else {
-indicatorValue.textContent = 'NO';
-gestureIndicator.classList.remove('active-yes');
-gestureIndicator.classList.add('active-no');
-indicatorInfo.textContent = 'No gesture at current timestamp';
-}
-}
+const handler2 = createGestureHandler({
+    inputEl: gestureJsonInput2,
+    indicatorEl: gestureIndicator2,
+    valueEl: indicatorValue2,
+    infoEl: indicatorInfo2
+});

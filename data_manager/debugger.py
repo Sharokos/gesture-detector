@@ -56,6 +56,7 @@ def export_person_features_data(gesture_analysis, person_id, deep_debug, output_
             "start_frame": window.start_frame,
             "end_frame": window.end_frame,
             "duration": window.duration_seconds,
+            "score":window.score,
         }
         if deep_debug:
             # ---- BODY PARTS ----

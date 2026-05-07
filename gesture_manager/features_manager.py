@@ -1,5 +1,5 @@
 from gesture_manager.features import Features
-from config import COCO_PARTS, HAND_PARTS, BASELINE_WINDOW
+from config import COCO_PARTS, HAND_PARTS, CORRECTION_FACTOR_HANDS, CORRECTION_FACTOR_VAR
 import numpy as np
 from math_utility import joint_angle
 import math
@@ -48,10 +48,10 @@ class FeaturesManager:
     def compute_features(self):
         self.motion_persistance = self.mean_motion_persistance_interest_parts()
         self.velocity = self.mean_velocity_interest_parts()
-        self.velocity_variance = self.mean_velocity_variance_interest_parts()
-        self.max_energy = self.max_energy_interest_parts()
-        self.left_hand_energy = self.mean_hand_energy("L")
-        self.right_hand_energy = self.mean_hand_energy("R")
+        self.velocity_variance = self.mean_velocity_variance_interest_parts() * CORRECTION_FACTOR_VAR
+        self.max_energy = self.max_energy_interest_parts() * CORRECTION_FACTOR_HANDS
+        self.left_hand_energy = self.max_hand_energy("L") * CORRECTION_FACTOR_HANDS
+        self.right_hand_energy = self.max_hand_energy("R") * CORRECTION_FACTOR_HANDS
         angle_features = self.compute_joint_angles_and_velocity()
         self.l_elbow_angle = angle_features["L_elbow_angle_mean"]
         self.r_elbow_angle = angle_features["R_elbow_angle_mean"]
@@ -64,7 +64,12 @@ class FeaturesManager:
         self.distal_proximal_ratio = self.compute_distal_proximal_motion_ratio()
         self.max_acceleration = self.max_acceleration_interest_parts()
         self.max_angular = max(self.l_elbow_angular_velocity, self.r_elbow_angular_velocity,self.r_shoulder_angular_velocity,self.l_shoulder_angular_velocity)
-        self.mean_baseline_distance = self.mean_distance_from_baseline_interest_parts()
+        self.mean_baseline_distance = self.max_distance_from_baseline_interest_parts()
+        self.max_motion_saliency = self.max_motion_saliency_interest_parts()
+        self.max_burstiness = self.max_burstiness_interest_parts()
+        self.max_directional_consistency = self.max_directional_consistency_interest_parts()
+        self.max_path_efficiency = self.max_path_efficiency_interest_parts()
+        self.max_direction_changes = self.max_direction_changes_interest_parts()
 
     def mean_motion_persistance_interest_parts(self):
         persistance_per_part = []
@@ -108,7 +113,6 @@ class FeaturesManager:
         return sum(velocities)/count if count > 0 else 0.0
     
     def max_energy_interest_parts(self):
-        # TODO: temp calculating mean instead of max
         energies = []
         count = 0
         for part in self.INTEREST_PARTS:
@@ -117,24 +121,26 @@ class FeaturesManager:
                 energies.append(f.motion_energy)
                 count +=1
 
-        return max(energies)/count if count>0 else 0.0
-    def mean_hand_energy(self, side: str):
-        features = (
-            self.left_hand_features if side == "L"
-            else self.right_hand_features
-        )
-        len_features = len(features)
-        return sum(self._values(features, "motion_energy"))/len_features
+        return float(np.nanpercentile(energies, 90))
+    # def mean_hand_energy(self, side: str):
+    #     features = (
+    #         self.left_hand_features if side == "L"
+    #         else self.right_hand_features
+    #     )
+    #     len_features = len(features)
+    #     return sum(self._values(features, "motion_energy"))/len_features
 
 
     def max_hand_energy(self, side: str):
         features = (
-            self.left_hand_features if side == "L"
-            else self.right_hand_features
+            self.body_features.get("LWrist") if side == "L"
+            else self.body_features.get("RWrist")
         )
+        energies = []
+        if features and features.motion_energy is not None:
+                energies.append(features.motion_energy)
 
-        values = self._values(features, "motion_energy")
-        return max(values) if values else 0.0
+        return float(np.nanpercentile(energies, 90))
     # safe getter
     def _values(self, features_dict, attr):
         return [
@@ -177,6 +183,7 @@ class FeaturesManager:
                     "{joint}_angle_mean": mean angle in radians
                     "{joint}_angvel_mean": mean angular velocity in radians/sec
             """
+            np.seterr(all='ignore')
             angles = {name: [] for name in self.ANGLE_DEFINITIONS}
 
             # 1. Compute per-frame angles
@@ -218,7 +225,7 @@ class FeaturesManager:
                 features[f"{name}_angvel_mean"] = mean_ang_vel
 
             return features
-    def mean_distance_from_baseline_interest_parts(self, baseline_window=BASELINE_WINDOW):
+    def max_distance_from_baseline_interest_parts(self):
         """
         Computes mean distance from baseline for INTEREST_PARTS
         using the baseline corresponding to the sliding window start frame.
@@ -255,8 +262,68 @@ class FeaturesManager:
                 part_dists.append(np.hypot(dx, dy))
 
             if part_dists:
-                distances.append(np.mean(part_dists))
+                distances.append(np.percentile(part_dists, 90))
 
         if distances:
-            return float(np.mean(distances))
+            return max(distances) 
         return 0.0
+    
+    def max_motion_saliency_interest_parts(self):
+        sal = []
+        for part in self.INTEREST_PARTS:
+            f = self.body_features.get(part)
+            if f and f.motion_saliency is not None:
+                sal.append(f.motion_saliency)
+
+        if not sal:
+            return None
+
+        return float(np.nanpercentile(sal, 90))    
+
+    def max_burstiness_interest_parts(self):
+        bursts = []
+        for part in self.INTEREST_PARTS:
+            f = self.body_features.get(part)
+            if f and f.burstiness is not None:
+                bursts.append(f.burstiness)
+
+        if not bursts:
+            return None
+
+        return float(np.nanpercentile(bursts, 90))   
+    
+    def max_directional_consistency_interest_parts(self):
+        dirs = []
+        for part in self.INTEREST_PARTS:
+            f = self.body_features.get(part)
+            if f and f.directional_consistency is not None:
+                dirs.append(f.directional_consistency)
+
+        if not dirs:
+            return None
+
+        return float(np.nanpercentile(dirs, 90))   
+    
+    def max_direction_changes_interest_parts(self):
+        dirs = []
+        for part in self.INTEREST_PARTS:
+            f = self.body_features.get(part)
+            if f and f.direction_changes is not None:
+                dirs.append(f.direction_changes)
+
+        if not dirs:
+            return None
+
+        return float(np.nanpercentile(dirs, 90))   
+    
+    def max_path_efficiency_interest_parts(self):
+        effs = []
+        for part in self.INTEREST_PARTS:
+            f = self.body_features.get(part)
+            if f and f.path_efficiency is not None:
+                effs.append(f.path_efficiency)
+
+        if not effs:
+            return None
+
+        return float(np.nanpercentile(effs, 90))   

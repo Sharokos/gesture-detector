@@ -3,10 +3,11 @@ import numpy as np
 
 from data_model.frame import Frame
 from math_utility import smooth_keypoints
-from config import BASELINE_WINDOW, SMOOTHING_WINDOW
+from config import SMOOTHING_WINDOW
+
 
 class BodyPart:
-    def __init__(self, part_name, person_id,gesture_analysis=None):
+    def __init__(self, part_name, person_id, gesture_analysis=None):
         """
         Initialize a BodyPart to track a single keypoint across frames.
 
@@ -35,6 +36,7 @@ class BodyPart:
         # if not self.confident(frame_idx):
         #     return None
         return (frame.x, frame.y)
+
     def get_normalized_coordinates(self, frame_idx):
         """
         Get normalized (x, y) coordinates for a specific frame index.
@@ -52,6 +54,7 @@ class BodyPart:
             return (None, None)
         return (frame.x_normalized, frame.y_normalized)
         # return (frame.x, frame.y)
+
     def compute_velocity_magnitude(self, frame_idx):
         """
         Get the precomputed velocity magnitude for a frame. If internal arrays are dirty,
@@ -87,12 +90,12 @@ class BodyPart:
         if getattr(self, "_dirty", True):
             self.build_velocities_and_accelerations()
 
-        if not hasattr(self, 'vx') or frame_idx < 0 or frame_idx >= len(self.vx):
+        if not hasattr(self, "vx") or frame_idx < 0 or frame_idx >= len(self.vx):
             return (0.0, 0.0)
 
         vx = self.vx[frame_idx]
         vy = self.vy[frame_idx]
-        
+
         if np.isnan(vx) or np.isnan(vy):
             return (0.0, 0.0)
         if not self.confident(frame_idx):
@@ -137,8 +140,9 @@ class BodyPart:
         - Acceleration is stored at the later frame index of the velocity interval
         """
 
-
-        fps = fps or getattr(self.gesture_analysis, 'frame_rate', getattr(Frame, 'FRAME_RATE', 24))
+        fps = fps or getattr(
+            self.gesture_analysis, "frame_rate", getattr(Frame, "FRAME_RATE", 24)
+        )
 
         if not self.frames:
             self.vx = np.array([], dtype=float)
@@ -174,7 +178,7 @@ class BodyPart:
 
         if len(idxs) >= 2:
             # compute per-interval dt (in seconds)
-            dt = np.diff(idxs) #/ float(fps)
+            dt = np.diff(idxs)  # / float(fps)
             dx = np.diff(x[idxs])
             dy = np.diff(y[idxs])
 
@@ -198,8 +202,8 @@ class BodyPart:
         # Assign arrays
         self.vx = vx
         self.vy = vy
-        self.velocities = smooth_keypoints(vel,SMOOTHING_WINDOW)
-        self.accelerations = smooth_keypoints(acc,SMOOTHING_WINDOW)
+        self.velocities = smooth_keypoints(vel, SMOOTHING_WINDOW)
+        self.accelerations = smooth_keypoints(acc, SMOOTHING_WINDOW)
         self._dirty = False
 
     # def update_normalized(self):
@@ -213,7 +217,7 @@ class BodyPart:
     #     # Mark arrays as stale
     #     self._dirty = True
 
-    def confident(self, frame_idx, confidence_threshold=0.7):
+    def confident(self, frame_idx, confidence_threshold=0.6):
         """
         Returns whether the frame at frame_idx has a confidence score above the threshold.
         """
@@ -234,42 +238,25 @@ class BodyPart:
         self.frames[frame.frame_no] = frame
         # Mark cached arrays as stale
         self._dirty = True
+
     def update_normalized(self):
         person = self.gesture_analysis.get_person_by_id(self.person_id)
         for frame in self.frames.values():
             normalization_data = person.get_normalization_data(frame.frame_no)
+            if normalization_data is None:
+                continue
             frame.update_normalized(
                 normalization_data.x_origin,
                 normalization_data.y_origin,
-                normalization_data.shoulder_length
+                normalization_data.shoulder_length,
             )
         self._dirty = True
 
-    # def compute_baselines(self, baseline_window=BASELINE_WINDOW):
-    #     self.baselines = {}
-    #     if not self.frames:
-    #         return
-    #     # Group frames by block
-    #     blocks = {}
-    #     for frame_idx, frame in self.frames.items():
-    #         if frame.x_normalized is None or frame.y_normalized is None:
-    #             continue
-    #         block_idx = frame_idx // baseline_window
-    #         blocks.setdefault(block_idx, []).append((frame.x_normalized, frame.y_normalized))
-
-    #     # Compute baseline per block
-    #     for block_idx, coords in blocks.items():
-    #         xs, ys = zip(*coords)
-    #         self.baselines[block_idx] = (
-    #             float(np.median(xs)),
-    #             float(np.median(ys))
-    #         )
-
     def compute_baselines(
         self,
-        alpha=0.998,
+        alpha=0.991,
         # alpha=0.995,
-        max_update_dist=0.25
+        max_update_dist=0.05,
     ):
         """
         Computes a self-updating baseline using EMA, per frame.
@@ -313,17 +300,18 @@ class BodyPart:
             #     print(dist)
             # Only update baseline if movement is small
             if dist < max_update_dist:
-            # if True:
+                # if True:
                 baseline_x = alpha * baseline_x + (1 - alpha) * x_normalized
                 baseline_y = alpha * baseline_y + (1 - alpha) * y_normalized
 
             # Store baseline (even if frozen)
             self.baselines[frame_idx] = (baseline_x, baseline_y)
+
     def __len__(self):
         return len(self.frames)
 
     def __repr__(self):
-        return (f"BodyPart('{self.part_name}', frames={len(self.frames)}")
+        return f"BodyPart('{self.part_name}', frames={len(self.frames)}"
 
     def display_frames(self):
         """

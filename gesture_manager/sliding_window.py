@@ -17,7 +17,9 @@ class SlidingWindow():
         self.duration_seconds = self.duration_frames / fps
         self.features_manager = FeaturesManager(self)
         self.score = compute_score(self.features_manager)
-        
+        self.threshold = 0
+        self.distance_threhsold = 0
+        self.is_gesture = 0
 
     def recompute_score(self):
         self.score = compute_score(self.features_manager)
@@ -31,4 +33,9 @@ class SlidingWindow():
             return False
         return self.score >= score_threshold
     
-    
+    def debug_print(self):
+        return_str = "====================\n"
+        return_str += f"Window starting at frame: {self.start_frame}\n"
+        return_str += f"Score: {self.score}\n"
+        return_str += "====================\n"
+        return return_str

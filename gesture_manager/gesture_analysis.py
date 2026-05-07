@@ -3,11 +3,13 @@ from data_manager.exporter import export_gesture_groups_to_json
 from data_manager import input_parser
 import numbers
 from math_utility import remove_outliers_mad
-from config import TEMPORAL_GAP
+from config import TEMPORAL_GAP, SCORE_THRESHOLD, MIN_WINDOW_THRESHOLD, MAX_NUMBER_OF_HOLD_WINDOWS
 import csv
 import os
-
+import numpy as np
+from skimage.filters import threshold_otsu
 class GestureAnalysis:
+    np.seterr(all='ignore')
     # COCO body parts minimal
     COCO_PARTS = [
         "Neck", "RShoulder", "RElbow", "RWrist", 
@@ -27,7 +29,7 @@ class GestureAnalysis:
         self.sliding_windows = []
         self.number_of_frames = 0
         # There will always be only one instance of gesture_analysis per video, so it's safe to store the FPS
-        self.frame_rate = 24
+        self.frame_rate = 29.970
         input_parser.parse_openpose_and_populate_persons(gesture_analysis=self)       
         print(f"Detected {len(self.persons)} persons")
         
@@ -62,21 +64,57 @@ class GestureAnalysis:
             person.build_all_data()
     
     def determine_gestures_for_person(self,person_id,output_path = None):
+        scores = []
+        distances = []
         self.clean_features_outliers_for_person(person_id)
         # Keep only the sliding windows of that person
         person_windows = self.get_windows_for_person(person_id)
         for w in person_windows:
             w.recompute_score()
+            scores.append(w.score)
+            distances.append(w.features_manager.mean_baseline_distance)
+        try:  
+            scores = np.array(scores)
+            distances = np.array(distances)
+            # Lowering the thresholds just a tad
+            threshold = 1 * threshold_otsu(scores)
+            threshold_distances = 0.46 * threshold_otsu(distances)
+            
+            for w in person_windows:
+                w.threshold = threshold
+                w.distance_threhsold = threshold_distances
+            print(f"Threshold with otsu is: {threshold}")
+        except Exception as e:
+            print("WARNING: Using config threshold!!!")
+            threshold = SCORE_THRESHOLD
+            threshold_distances = 0.05
+
         # Keep only sliding windows marked as containing gestures
-        gesture_windows = [w for w in person_windows if w.contains_gesture()]
+        # gesture_windows = [w for w in person_windows if w.contains_gesture(threshold)]
+
+        # TODO: intersting idea. Parse all windows and have a more complex way of determining if it contains gesture.
+        # For example: if the prev window has a high acc/vel/score and the current one not, check if baseline distance is high at the moment. Most probably the person is holding the gesture.
+        # How to extend this to the next windows? If the baseline distance remains the same as the prev... but until when? Ugh... to be seen
+        # ================== TEMP TESTING =====================================
+        segments = self.detect_gesture_segments(
+            person_windows,
+            start_thresh=threshold,
+            hold_distance_thresh=threshold_distances,
+            min_length=2
+        )
+        for segment in segments:
+            for w in segment:
+                w.is_gesture = 0.3
+        gesture_windows = [w for w in person_windows if w.is_gesture == 0.3]
+        # ===================================================================
         print(f"\nPerson {person_id}: Detected {len(gesture_windows)} gesture windows")
         gesture_groups = self.merge_gesture_windows(
             gesture_windows,
             max_temporal_gap=TEMPORAL_GAP,
         )
-        self.print_gesture_summary(gesture_groups)
+        filtered_gesture_groups = self.filter_gestures(gesture_groups)
         # Export to JSON for video helper
-        export_gesture_groups_to_json(self,gesture_groups, os.path.join(output_path , "gestures.json"))
+        export_gesture_groups_to_json(self, filtered_gesture_groups, os.path.join(output_path , "gestures.json"))
 
     def get_windows_for_person(self,person_id):
         person_windows = []
@@ -171,7 +209,18 @@ class GestureAnalysis:
             summary.append(gesture_info)
         
         return summary
-    
+    def filter_gestures(self, gesture_groups):
+        """
+        Filter out gesture groups with too few windows.
+        """
+
+        return [
+            group for group in gesture_groups
+            if len(group) > MIN_WINDOW_THRESHOLD
+        ]
+
+        
+
     def print_gesture_summary(self, gesture_groups):
         """
         Print a formatted gesture summary to the console.
@@ -304,3 +353,115 @@ class GestureAnalysis:
                     row[field] = getattr(fm, field, None)
 
                 writer.writerow(row)
+
+
+    def detect_gesture_segments(
+        self,
+        person_windows,
+        start_thresh=0.6,
+        hold_distance_thresh=0.05,
+        min_length=2,
+        max_hold_frames=MAX_NUMBER_OF_HOLD_WINDOWS
+    ):
+
+        segments = []
+        current = []
+        hold_buffer = []
+
+        state = 0  # IDLE
+        continue_thresh = start_thresh
+
+        hold_count = 0
+
+        for i, w in enumerate(person_windows):
+
+            if w.start_frame <= 2 * SlidingWindow.WINDOW_SIZE:
+                continue
+
+            score = w.score
+            baseline_dist = w.features_manager.mean_baseline_distance
+
+            # =========================
+            # IDLE
+            # =========================
+            if state == 0:
+
+                if score > start_thresh:
+                    current = [w]
+                    hold_buffer = []
+                    state = 2  # ACTIVE
+
+            # =========================
+            # ACTIVE
+            # =========================
+            elif state == 2:
+
+                if score > continue_thresh:
+                    current.append(w)
+
+                else:
+                    if baseline_dist > hold_distance_thresh:
+                        state = 3  # HOLD
+                        hold_buffer = [w]
+                        hold_count = 1
+
+                    else:
+                        if len(current) >= min_length:
+                            segments.append(current)
+
+                        current = []
+                        state = 0
+
+            # =========================
+            # HOLD
+            # =========================
+            elif state == 3:
+                # movement resumed
+                if score > continue_thresh:
+
+                    current.extend(hold_buffer)
+                    current.append(w)
+
+                    hold_buffer = []
+                    hold_count = 0
+
+                    state = 2  # ACTIVE
+
+                # still holding
+                elif baseline_dist > hold_distance_thresh:
+
+                    hold_buffer.append(w)
+                    hold_count += 1
+
+                    # hold too long → discard hold
+                    if hold_count > max_hold_frames:
+
+                        if len(current) >= min_length:
+                            segments.append(current)
+
+                        current = []
+                        hold_buffer = []
+                        hold_count = 0
+
+                        state = 0
+
+                # hold released naturally
+                else:
+
+                    # short hold counts as gesture
+                    current.extend(hold_buffer)
+
+                    if len(current) >= min_length:
+                        segments.append(current)
+
+                    current = []
+                    hold_buffer = []
+                    hold_count = 0
+
+                    state = 0
+
+        # finalize
+        if len(current) >= min_length:
+            segments.append(current)
+
+        return segments

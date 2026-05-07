@@ -11,9 +11,13 @@ class Features():
         self.mean_velocity = self.compute_mean_velocity()
         self.motion_persistence = self.compute_motion_persistence()
         self.velocity_variance = self.compute_velocity_variance()
-        # self.directional_consistency = self.compute_directional_consistency()
         self.max_acceleration = self.compute_max_acceleration()
         self.median_x, self.median_y = self.compute_median_coords()
+        self.motion_saliency = self.compute_motion_saliency()
+        self.burstiness = self.compute_burstiness()
+        self.directional_consistency = self.compute_directional_consistency()
+        self.direction_changes = self.compute_direction_changes()
+        self.path_efficiency = self.compute_path_efficiency()
 
 
     def compute_median_coords(self):
@@ -55,7 +59,7 @@ class Features():
             # velocity -= origin.get_velocity_magnitude(frame_idx)
             total_velocity += velocity
             count += 1
-        return np.median(total_velocity)
+        return total_velocity / count if count > 0 else 0.0
     
     def compute_max_acceleration(self):
         # Not calculating mean because we are interested in a "burst" of movement and we want to see the maximum value
@@ -66,9 +70,22 @@ class Features():
             acc = self.body_part.get_acceleration_magnitude(frame_idx)
             accelerations.append(acc)
             count += 1
-        return sum(accelerations)/count
-    
-    def compute_motion_persistence(self, threshold=0.01):
+        # return sum(accelerations)/count
+        return max(accelerations)
+    def compute_motion_saliency(self, epsilon=1e-6):
+        velocities = []
+        for frame_idx in range(self.sw.start_frame + 1, self.sw.end_frame + 1):
+            v = self.body_part.get_velocity_magnitude(frame_idx)
+            velocities.append(v)
+
+        if not velocities:
+            return 0.0
+
+        max_v = max(velocities)
+        mean_v = sum(velocities) / len(velocities)
+
+        return max_v / (mean_v + epsilon)
+    def compute_motion_persistence(self, threshold=0.03):
         # Ratio of how many frames contain movement in a window
         total_frames = self.sw.WINDOW_SIZE
 
@@ -94,21 +111,95 @@ class Features():
 
         return variance
 
-    def compute_directional_consistency(self, min_velocity_threshold=0.1):
+    def compute_directional_consistency(self, min_velocity_threshold=0.03):
         vx_sum, vy_sum = 0.0, 0.0
         magnitude_sum = 0.0
+
         for frame_idx in range(self.sw.start_frame + 1, self.sw.end_frame + 1):
             vx, vy = self.body_part.get_velocity_vector(frame_idx)
-            vel_mag = (vx**2 + vy**2)**0.5
-            if vel_mag < min_velocity_threshold:
-                continue  # ignore tiny motions
+            mag = (vx**2 + vy**2)**0.5
+
+            if mag < min_velocity_threshold:
+                continue
+
             vx_sum += vx
             vy_sum += vy
-            magnitude_sum += vel_mag
+            magnitude_sum += mag
 
         if magnitude_sum == 0:
-            return 0.0  # no motion
+            return 0.0
 
-        # Ratio of net motion to total motion
-        consistency = (vx_sum**2 + vy_sum**2)**0.5 / magnitude_sum
-        return min(max(consistency, 0.0), 1.0)  # limit the return between 0 and 1
+        net_motion = (vx_sum**2 + vy_sum**2)**0.5
+        return net_motion / magnitude_sum
+    
+    def compute_burstiness(self, epsilon=1e-6):
+        velocities = []
+        for frame_idx in range(self.sw.start_frame + 1, self.sw.end_frame + 1):
+            velocities.append(self.body_part.get_velocity_magnitude(frame_idx))
+
+        if not velocities:
+            return 0.0
+
+        mean_v = sum(velocities) / len(velocities)
+        std_v = np.std(velocities)
+
+        return std_v / (mean_v + epsilon)
+    
+
+    def compute_direction_changes(self, min_velocity_threshold=0.03):
+        prev_vx, prev_vy = None, None
+        changes = 0
+
+        for frame_idx in range(self.sw.start_frame + 1, self.sw.end_frame + 1):
+            vx, vy = self.body_part.get_velocity_vector(frame_idx)
+            mag = (vx**2 + vy**2)**0.5
+
+            if mag < min_velocity_threshold:
+                continue
+
+            if prev_vx is not None:
+                dot = vx * prev_vx + vy * prev_vy
+                if dot < 0:  # opposite direction
+                    changes += 1
+
+            prev_vx, prev_vy = vx, vy
+
+        return changes
+    
+
+    def compute_path_efficiency(self):
+        total_dist = 0.0
+        start = None
+        end = None
+        prev = None
+
+        for frame_idx in range(self.sw.start_frame + 1, self.sw.end_frame + 1):
+            coords = self.body_part.get_normalized_coordinates(frame_idx)
+
+            if coords is None:
+                continue
+
+            x, y = coords
+
+            if x is None or y is None:
+                continue
+
+            if start is None:
+                start = (x, y)
+
+            if prev is not None:
+                dx = x - prev[0]
+                dy = y - prev[1]
+                total_dist += (dx**2 + dy**2) ** 0.5
+
+            prev = (x, y)
+            end = (x, y)
+
+        if start is None or end is None or total_dist == 0:
+            return 0.0
+
+        dx = end[0] - start[0]
+        dy = end[1] - start[1]
+        displacement = (dx**2 + dy**2) ** 0.5
+
+        return displacement / total_dist

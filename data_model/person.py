@@ -208,6 +208,18 @@ class PersonGesture:
         return math.hypot(rx - lx, ry - ly)
 
     def smooth_person_keypoints(self, window=3):
+         # Smooth function
+        def smooth_array(arr, w):
+            smoothed = arr.copy()
+            for i in range(n_frames):
+                start = max(0, i - w)
+                end = min(n_frames, i + w + 1)
+                window_vals = arr[start:end]
+                if np.any(~np.isnan(window_vals)):
+                    smoothed[i] = np.nanmean(window_vals)
+                else:
+                    smoothed[i] = np.nan
+            return smoothed
         for part_name, body_part in self.body.items():
             # Skip if no frames
             if not body_part.frames:
@@ -225,18 +237,61 @@ class PersonGesture:
             x = np.where(x is None, np.nan, x)
             y = np.where(y is None, np.nan, y)
 
-            # Smooth function
-            def smooth_array(arr, w):
-                smoothed = arr.copy()
-                for i in range(n_frames):
-                    start = max(0, i - w)
-                    end = min(n_frames, i + w + 1)
-                    window_vals = arr[start:end]
-                    if np.any(~np.isnan(window_vals)):
-                        smoothed[i] = np.nanmean(window_vals)
-                    else:
-                        smoothed[i] = np.nan
-                return smoothed
+           
+
+            x_smooth = smooth_array(x, window)
+            y_smooth = smooth_array(y, window)
+
+            # Write back smoothed values
+            for idx, frame_idx in enumerate(frame_indices):
+                frame = body_part.frames[frame_idx]
+                frame.x = x_smooth[idx]
+                frame.y = y_smooth[idx]
+        for part_name, body_part in self.right_hand.items():
+            # Skip if no frames
+            if not body_part.frames:
+                continue
+
+            # Get frame indices sorted
+            frame_indices = sorted(body_part.frames.keys())
+            n_frames = len(frame_indices)
+
+            # Extract x and y arrays
+            x = np.array([body_part.frames[i].x for i in frame_indices], dtype=float)
+            y = np.array([body_part.frames[i].y for i in frame_indices], dtype=float)
+
+            # Replace None with np.nan
+            x = np.where(x is None, np.nan, x)
+            y = np.where(y is None, np.nan, y)
+
+            
+
+            x_smooth = smooth_array(x, window)
+            y_smooth = smooth_array(y, window)
+
+            # Write back smoothed values
+            for idx, frame_idx in enumerate(frame_indices):
+                frame = body_part.frames[frame_idx]
+                frame.x = x_smooth[idx]
+                frame.y = y_smooth[idx]
+        for part_name, body_part in self.left_hand.items():
+            # Skip if no frames
+            if not body_part.frames:
+                continue
+
+            # Get frame indices sorted
+            frame_indices = sorted(body_part.frames.keys())
+            n_frames = len(frame_indices)
+
+            # Extract x and y arrays
+            x = np.array([body_part.frames[i].x for i in frame_indices], dtype=float)
+            y = np.array([body_part.frames[i].y for i in frame_indices], dtype=float)
+
+            # Replace None with np.nan
+            x = np.where(x is None, np.nan, x)
+            y = np.where(y is None, np.nan, y)
+
+            
 
             x_smooth = smooth_array(x, window)
             y_smooth = smooth_array(y, window)

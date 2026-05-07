@@ -19,17 +19,23 @@ GESTURE_DETECTION = True
 # GENERATE_JSONS = True and GESTURE_DETECTION = True -> start from scratch, use OpenPose to generate keypoint jsons and then detect gestuers
 # GENERATE_JSONS = True and GESTURE_DETECTION = False -> only generate keypoint jsons using OpenPose for later use
 
+CORRECTION_FACTOR_VAR = 100000
+CORRECTION_FACTOR_HANDS = 100
 WEIGHTS ={
-    "motion_energy_weight": 0.15,
-    "mean_velocity_weight":0.15,
-    "mean_velocity_variance_weight":0,
-    "distal_proximal_weight":0.2,
-    "persistence_weight":0.15,
-    "directional_weight":0,
-    "max_angular_velocity_weight":0.1,
-    "hands_energy_weight":0,
-    "mean_baseline_distance":0.45,
-    "acc_weight":0.15
+"motion_energy_weight": 0.15,
+"mean_velocity_weight": 0.35,
+"mean_velocity_variance_weight": 0,
+"distal_proximal_weight": 0.05,
+"persistence_weight": 0.0,
+"directional_weight": 0.05,
+"max_angular_velocity_weight": 0.04,
+"hands_energy_weight": 0,
+"mean_baseline_distance": 0,
+"acc_weight": 0.08,
+"saliency_weight": 0.035,
+"burst_weight": 0.0,
+"changes_weight": 0.025,
+"path_efficiency_weight": 0.05,
 }
 
 # Number of frames for a sliding window object. Gesture detection happens per sliding window.
@@ -40,15 +46,23 @@ SLIDING_WINDOW_SIZE = 18
 SLIDING_WINDOW_STEP = 9
 # Number of frames for smoothing out coordinates, velocities and accelerations, reducing noise in the data.
 SMOOTHING_WINDOW = 9
+# Only consider gestures that consists of more windows than this threshold
+MIN_WINDOW_THRESHOLD = 3
+# Any adjacent sliding windows that are less than TEMPORAL_GAP number of frames apart will be merged into one single gesture.
+TEMPORAL_GAP =  SLIDING_WINDOW_STEP +3
+
+# The maximum number of sliding windows for which to consider a "HOLD". If the position is held for more than this number, the windows will not be marked as containing gestures
+MAX_NUMBER_OF_HOLD_WINDOWS = 15
+
+# Below variables are no longer used in usual flows
+# ============== OBSOLETHE ===================
 # Number of frames for which we calculate a "baseline" position for a body part -> average coordinates throughout the duration
 # If too small -> won't really be a baseline, but rather a snapshot of the coordinates
 # If too large -> false baseline, because of natural shift in posture 
-BASELINE_WINDOW = 500
+BASELINE_WINDOW = 50
 # A sliding window with a score above this threshold will be considered a gesture
-SCORE_THRESHOLD = 0.07
-# Any adjacent sliding windows that are less than TEMPORAL_GAP number of frames apart will be merged into one single gesture.
-TEMPORAL_GAP = 9
-
+SCORE_THRESHOLD = 1
+# =============================================
 
 # COCO body parts minimal
 COCO_PARTS = [

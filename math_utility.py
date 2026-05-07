@@ -23,12 +23,15 @@ def remove_outliers_mad(values, k=3.5):
 
 def to_vec(a, b):
     """Vector from a -> b"""
+    np.seterr(all='ignore')
     return np.array(b) - np.array(a)
 
 def vector_norm(v):
+    np.seterr(all='ignore')
     return np.linalg.norm(v) + EPS
 
 def angle_between(v1, v2):
+    np.seterr(all='ignore')
     """Angle in radians between vectors"""
     v1n = v1 / vector_norm(v1)
     v2n = v2 / vector_norm(v2)
@@ -48,6 +51,7 @@ def euclidean_distance(p1, p2):
     return vector_norm(to_vec(p1, p2))
 
 def smooth_signal(arr, window=3):
+    np.seterr(all='ignore')
     out = arr.copy()
     for i in range(window, len(arr)):
         vals = arr[i-window:i+1]
@@ -57,6 +61,7 @@ def smooth_signal(arr, window=3):
 
 # TODO: try this smooth function and observe how the coordinates behave afterwards.
 def smooth_keypoints(coords, window=3):
+    np.seterr(all='ignore')
     smoothed = coords.copy()
     for i in range(len(coords)):
         start = max(0, i-window)
