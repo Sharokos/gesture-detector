@@ -25,66 +25,136 @@ HAND_DEBUG = False
 
 INPUT_ROOT = INPUT_DIR
 
-
-
 OUTPUT_ROOT = os.path.join(
     os.path.dirname(INPUT_ROOT),
     "OUTPUT_" + os.path.basename(INPUT_ROOT)
 )
+
 os.makedirs(OUTPUT_ROOT, exist_ok=True)
 
+VIDEO_EXTENSIONS = (".mp4", ".avi", ".mov", ".mkv")
+
 for subdir in os.listdir(INPUT_ROOT):
+
     input_dir = os.path.join(INPUT_ROOT, subdir)
-    video_fps = 30
 
     if not os.path.isdir(input_dir):
         continue
 
-    
+    # Find ALL videos in this subdir
+    video_files = [
+        f for f in os.listdir(input_dir)
+        if f.lower().endswith(VIDEO_EXTENSIONS)
+    ]
 
-    json_dir = os.path.join(OUTPUT_ROOT, subdir, "json")
-    output_path = os.path.join(OUTPUT_ROOT, subdir, "results")
-
-    os.makedirs(json_dir, exist_ok=True)
-    os.makedirs(output_path, exist_ok=True)
-    try:
-        video_files = [f for f in os.listdir(input_dir) if f.endswith((".mp4", ".avi"))]
-        video_path = os.path.join(input_dir, video_files[0])
-        video_fps = get_video_frame_count(video_path)
-        print(f"Processing video: {video_path}.")
-        print(f"Detected FPS: {video_fps}.")
-    except IndexError:
-        print(f"No video found in {input_dir}")
+    if not video_files:
+        print(f"No videos found in {input_dir}")
         continue
-    # --- OPENPOSE ---
-    if GENERATE_JSONS:
-        print(f"Processing (OPENPOSE): {subdir}")
-        
-        run_openpose(
-            video_path=video_path,
-            output_json_dir=json_dir,
-            openpose_dir=OPEN_POSE_DIR,
-            openpose_args=f"--hand --net_resolution {RESOLUTION}"
+
+    # Process EACH video
+    for video_file in video_files:
+
+        video_path = os.path.join(input_dir, video_file)
+
+        # video filename without extension
+        video_name = os.path.splitext(video_file)[0]
+
+        # output structure:
+        # OUTPUT_INPUTVIDEOS/subdir/video_name/
+        video_output_root = os.path.join(
+            OUTPUT_ROOT,
+            subdir,
+            video_name
         )
 
-    # --- GESTURE DETECTION ---
-    if GESTURE_DETECTION:
-        print(f"Processing (Gesture detection): {subdir}")
-        gesture_analysis = GestureAnalysis(input_folder = json_dir,frame_rate = video_fps)
-        
-        # gesture_analysis.execute_debug()
-        gesture_analysis.execute()
-        person_id = 0
-        gesture_analysis.determine_gestures_for_person(person_id, output_path)
+        json_dir = os.path.join(video_output_root, "json")
+        output_path = os.path.join(video_output_root, "results")
 
-        if DEBUG_FLAG:
-            gesture_analysis.export_windows_to_csv(os.path.join(output_path, "windows.csv"))
-            export_person_bodyparts_data(gesture_analysis, person_id, HAND_DEBUG, output_path)
-            export_person_features_data(gesture_analysis, person_id, DEEP_DEBUG, output_path)
+        os.makedirs(json_dir, exist_ok=True)
+        os.makedirs(output_path, exist_ok=True)
 
-            plot_person_sliding_windows(gesture_analysis, person_id, output_path)
-            plot_normalization_data(gesture_analysis, person_id, output_path)
-            plot_person_bodypart_features(gesture_analysis, person_id, output_path)
+        try:
+            video_fps = get_video_frame_count(video_path)
 
-            if DEEP_DEBUG:
-                plot_body_part_features(gesture_analysis, person_id, output_path)
+            print(f"\nProcessing video: {video_path}")
+            print(f"Detected FPS: {video_fps}")
+
+        except Exception as e:
+            print(f"Could not process video {video_path}")
+            print(e)
+            continue
+
+        # --- OPENPOSE ---
+        if GENERATE_JSONS:
+            print(f"Processing (OPENPOSE): {video_file}")
+
+            run_openpose(
+                video_path=video_path,
+                output_json_dir=json_dir,
+                openpose_dir=OPEN_POSE_DIR,
+                openpose_args=f"--hand --net_resolution {RESOLUTION}"
+            )
+
+        # --- GESTURE DETECTION ---
+        if GESTURE_DETECTION:
+            print(f"Processing (Gesture detection): {video_file}")
+
+            gesture_analysis = GestureAnalysis(
+                input_folder=json_dir,
+                frame_rate=video_fps
+            )
+
+            # gesture_analysis.execute_debug()
+            gesture_analysis.execute()
+
+            person_id = 0
+
+            gesture_analysis.determine_gestures_for_person(
+                person_id,
+                output_path
+            )
+
+            if DEBUG_FLAG:
+
+                gesture_analysis.export_windows_to_csv(
+                    os.path.join(output_path, "windows.csv")
+                )
+
+                export_person_bodyparts_data(
+                    gesture_analysis,
+                    person_id,
+                    HAND_DEBUG,
+                    output_path
+                )
+
+                export_person_features_data(
+                    gesture_analysis,
+                    person_id,
+                    DEEP_DEBUG,
+                    output_path
+                )
+
+                plot_person_sliding_windows(
+                    gesture_analysis,
+                    person_id,
+                    output_path
+                )
+
+                plot_normalization_data(
+                    gesture_analysis,
+                    person_id,
+                    output_path
+                )
+
+                plot_person_bodypart_features(
+                    gesture_analysis,
+                    person_id,
+                    output_path
+                )
+
+                if DEEP_DEBUG:
+                    plot_body_part_features(
+                        gesture_analysis,
+                        person_id,
+                        output_path
+                    )
