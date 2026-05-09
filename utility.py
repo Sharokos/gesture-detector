@@ -2,8 +2,15 @@ from pathlib import Path
 import json
 from data_model.person import PersonGesture
 import plotly.graph_objs as go
+import cv2
 
-
+def get_video_frame_count(video_path):
+    cap = cv2.VideoCapture(str(video_path))
+    if not cap.isOpened():
+        raise RuntimeError(f"Could not open video: {video_path}")
+    count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    cap.release()
+    return count
 
 # def get_person_by_id(person_id):
 #     """

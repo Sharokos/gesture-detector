@@ -26,6 +26,7 @@ class Frame:
             y_origin (float): y coordinate of the origin.
             shoulder_length (float): shoulder length for normalization.
         """
+
         self.x_normalized = (self.x - x_origin) / shoulder_length if shoulder_length != 0 else 0
         self.y_normalized = (self.y - y_origin) / shoulder_length if shoulder_length != 0 else 0
     def get_timestamp(self):

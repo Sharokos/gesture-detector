@@ -64,12 +64,18 @@ class FeaturesManager:
         self.distal_proximal_ratio = self.compute_distal_proximal_motion_ratio()
         self.max_acceleration = self.max_acceleration_interest_parts()
         self.max_angular = max(self.l_elbow_angular_velocity, self.r_elbow_angular_velocity,self.r_shoulder_angular_velocity,self.l_shoulder_angular_velocity)
-        self.mean_baseline_distance = self.max_distance_from_baseline_interest_parts()
-        self.max_motion_saliency = self.max_motion_saliency_interest_parts()
+        
+        self.max_motion_saliency = self.max_motion_saliency_interest_parts() * 0.1
         self.max_burstiness = self.max_burstiness_interest_parts()
         self.max_directional_consistency = self.max_directional_consistency_interest_parts()
-        self.max_path_efficiency = self.max_path_efficiency_interest_parts()
+        self.max_path_efficiency = self.max_path_efficiency_interest_parts()  * 0.1
         self.max_direction_changes = self.max_direction_changes_interest_parts()
+        self.max_distance_vertical = abs(self.max_distance_from_baseline_vertical())
+        self.max_distance_horizontal = abs(self.max_distance_from_baseline_horizontal())
+
+        # self.mean_baseline_distance = self.max_distance_from_baseline_interest_parts()
+        # TODO: investigate this some more? Maybe!
+        self.mean_baseline_distance = max(self.max_distance_vertical, self.max_distance_horizontal)
 
     def mean_motion_persistance_interest_parts(self):
         persistance_per_part = []
@@ -267,7 +273,137 @@ class FeaturesManager:
         if distances:
             return max(distances) 
         return 0.0
-    
+
+    # def max_distance_from_baseline_interest_parts(self):
+
+    #     interest_parts = ["LWrist", "RWrist"]
+    #     distances = []
+
+    #     window_k = 5  # smoothing window
+
+    #     for part_name in interest_parts:
+
+    #         body_part = self.person.get_body_part(part_name)
+    #         if body_part is None or not hasattr(body_part, "baselines"):
+    #             continue
+
+    #         part_dists = []
+    #         rolling = []
+
+    #         for frame_idx in range(self.sw.start_frame, self.sw.end_frame + 1):
+
+    #             baseline = body_part.baselines.get(frame_idx)
+    #             if baseline is None:
+    #                 continue
+
+    #             bx, by = baseline
+
+    #             coords = body_part.get_normalized_coordinates(frame_idx)
+    #             if coords is None:
+    #                 continue
+
+    #             x, y = coords
+    #             if x is None or y is None:
+    #                 continue
+
+    #             dx = x - bx
+    #             dy = y - by
+
+    #             dist = np.hypot(dx, dy)
+
+    #             # smoothing over time
+    #             rolling.append(dist)
+    #             if len(rolling) > window_k:
+    #                 rolling.pop(0)
+
+    #             part_dists.append(max(rolling))
+
+    #         if part_dists:
+    #             distances.append(np.percentile(part_dists, 90))
+
+    #     return max(distances) if distances else 0.0
+    def max_distance_from_baseline_horizontal(self):
+        """
+        Computes mean distance from baseline for INTEREST_PARTS
+        using the baseline corresponding to the sliding window start frame.
+        """
+        interest_parts = ["LWrist","RWrist"]
+        distances = []
+
+        # for part_name in self.INTEREST_PARTS:
+        for part_name in interest_parts:
+            body_part = self.person.get_body_part(part_name)
+            if body_part is None:
+                continue
+
+            if not hasattr(body_part, "baselines"):
+                continue
+
+            
+
+            # compute distances within window
+            part_dists = []
+            for frame_idx in range(self.sw.start_frame, self.sw.end_frame + 1):
+                # frame = body_part.frames.get(frame_idx)
+                baseline = body_part.baselines.get(frame_idx)
+                if baseline is None:
+                    continue
+
+                bx, by = baseline
+                x_normalized, y_normalized = body_part.get_normalized_coordinates(frame_idx)
+                if x_normalized is None or y_normalized is None:
+                    continue
+
+                dx = x_normalized - bx
+                part_dists.append(dx)
+
+            if part_dists:
+                distances.append(np.percentile(part_dists, 90))
+
+        if distances:
+            return max(distances) 
+        return 0.0
+    def max_distance_from_baseline_vertical(self):
+        """
+        Computes mean distance from baseline for INTEREST_PARTS
+        using the baseline corresponding to the sliding window start frame.
+        """
+        interest_parts = ["LWrist","RWrist"]
+        distances = []
+
+        # for part_name in self.INTEREST_PARTS:
+        for part_name in interest_parts:
+            body_part = self.person.get_body_part(part_name)
+            if body_part is None:
+                continue
+
+            if not hasattr(body_part, "baselines"):
+                continue
+
+            
+
+            # compute distances within window
+            part_dists = []
+            for frame_idx in range(self.sw.start_frame, self.sw.end_frame + 1):
+                # frame = body_part.frames.get(frame_idx)
+                baseline = body_part.baselines.get(frame_idx)
+                if baseline is None:
+                    continue
+
+                bx, by = baseline
+                x_normalized, y_normalized = body_part.get_normalized_coordinates(frame_idx)
+                if x_normalized is None or y_normalized is None:
+                    continue
+
+                dy = y_normalized - by
+                part_dists.append(dy)
+
+            if part_dists:
+                distances.append(np.percentile(part_dists, 90))
+
+        if distances:
+            return max(distances) 
+        return 0.0
     def max_motion_saliency_interest_parts(self):
         sal = []
         for part in self.INTEREST_PARTS:

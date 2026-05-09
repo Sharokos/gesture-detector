@@ -9,7 +9,7 @@ def export_gesture_groups_to_json(gesture_analysis, gesture_groups, output_file=
             output_file (str): Path to output JSON file. If None, uses 'gestures.json'.
         
         Returns:
-            str: Path to the created JSON file.
+            str: JSON contents
         """
         if output_file is None:
             output_file = "gestures.json"
@@ -38,4 +38,4 @@ def export_gesture_groups_to_json(gesture_analysis, gesture_groups, output_file=
             json.dump(gestures, jsonfile, indent=2)
         
         print(f"\nExported {len(gestures)} gestures to: {output_file}")
-        return output_file
+        return gestures

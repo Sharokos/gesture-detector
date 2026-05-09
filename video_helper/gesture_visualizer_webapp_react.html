@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gesture Visualizer</title>
+<style>
+body {
+  font-family: Arial, sans-serif;
+  background: #0f172a;
+  color: white;
+  margin: 0;
+  padding: 20px;
+}
+
+.panel {
+  background: #111827;
+  border-radius: 10px;
+  padding: 15px;
+  margin-bottom: 20px;
+}
+
+canvas {
+  width: 100%;
+  background: #020617;
+  border: 1px solid #334155;
+}
+
+button {
+  margin: 4px;
+  padding: 6px 10px;
+  background: #1e293b;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+button.active {
+  background: #16a34a;
+}
+
+video {
+  width: 30%;
+  height: auto;
+  margin-top: 10px;
+  display: block;
+}
+
+#metrics {
+  margin-top: 10px;
+}
+</style>
+</head>
+<body>
+
+<h1>Gesture Visualizer</h1>
+
+<div class="panel">
+  <h2>Video</h2>
+  <input type="file" id="videoInput" accept="video/*">
+  <video id="video" controls></video>
+</div>
+
+<div class="panel">
+  <h2>CSV Folder</h2>
+  <input type="file" id="csvInput" webkitdirectory multiple>
+
+  <div>
+    <label>Body Part:</label>
+    <select id="bodyPartSelect"></select>
+  </div>
+
+  <div id="metrics"></div>
+</div>
+
+<div class="panel">
+  <canvas id="chart" width="1400" height="500"></canvas>
+</div>
+
+<script>
+const videoInput = document.getElementById('videoInput');
+const video = document.getElementById('video');
+const csvInput = document.getElementById('csvInput');
+const bodyPartSelect = document.getElementById('bodyPartSelect');
+const metricsDiv = document.getElementById('metrics');
+const chart = document.getElementById('chart');
+const ctx = chart.getContext('2d');
+
+let csvData = {};
+let selectedBodyPart = null;
+let selectedMetrics = [];
+let currentFrame = 0;
+const FPS = 29.97;
+
+const colors = ['#3b82f6','#ef4444','#22c55e','#f59e0b','#a855f7'];
+
+videoInput.addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  video.src = URL.createObjectURL(file);
+});
+
+function parseCSV(text) {
+  const lines = text.trim().split('\n');
+  const headers = lines[0].split(',');
+
+  const rows = lines.slice(1).map(line => {
+    const values = line.split(',');
+    const row = {};
+
+    headers.forEach((h, i) => {
+      const v = values[i];
+      const num = parseFloat(v);
+      row[h.trim()] = isNaN(num) ? v : num;
+    });
+
+    return row;
+  });
+
+  return { headers, rows };
+}
+
+csvInput.addEventListener('change', async (e) => {
+  csvData = {};
+
+  const files = [...e.target.files].filter(f => f.name.endsWith('.csv'));
+
+  for (const file of files) {
+    const text = await file.text();
+    const parsed = parseCSV(text);
+
+    const name = file.name.replace('.csv', '');
+    csvData[name] = parsed;
+  }
+
+  bodyPartSelect.innerHTML = '';
+
+  Object.keys(csvData).forEach(part => {
+    const option = document.createElement('option');
+    option.value = part;
+    option.textContent = part;
+    bodyPartSelect.appendChild(option);
+  });
+
+  if (Object.keys(csvData).length > 0) {
+    selectBodyPart(Object.keys(csvData)[0]);
+  }
+});
+
+bodyPartSelect.addEventListener('change', () => {
+  selectBodyPart(bodyPartSelect.value);
+});
+
+function selectBodyPart(part) {
+  selectedBodyPart = part;
+
+  const headers = csvData[part].headers.filter(h => h !== 'frame_idx');
+
+  selectedMetrics = headers.slice(0, 2);
+
+  renderMetricButtons(headers);
+  drawChart();
+}
+
+function renderMetricButtons(headers) {
+  metricsDiv.innerHTML = '';
+
+  headers.forEach(metric => {
+    const btn = document.createElement('button');
+    btn.textContent = metric;
+
+    if (selectedMetrics.includes(metric)) {
+      btn.classList.add('active');
+    }
+
+    btn.onclick = () => {
+      if (selectedMetrics.includes(metric)) {
+        selectedMetrics = selectedMetrics.filter(m => m !== metric);
+      } else {
+        selectedMetrics.push(metric);
+      }
+
+      renderMetricButtons(headers);
+      drawChart();
+    };
+
+    metricsDiv.appendChild(btn);
+  });
+}
+
+video.addEventListener('timeupdate', () => {
+  currentFrame = Math.floor(video.currentTime * FPS);
+  drawChart();
+});
+
+function drawChart() {
+  ctx.clearRect(0, 0, chart.width, chart.height);
+
+  ctx.fillStyle = '#020617';
+  ctx.fillRect(0, 0, chart.width, chart.height);
+
+  if (!selectedBodyPart) return;
+
+  const rows = csvData[selectedBodyPart].rows;
+
+  const xValues = rows.map(r => r.frame_idx);
+  const minX = Math.min(...xValues);
+  const maxX = Math.max(...xValues);
+  const xRange = maxX - minX || 1;
+
+  // grid + x axis labels
+  ctx.strokeStyle = '#1e293b';
+  ctx.fillStyle = '#64748b';
+  ctx.font = '12px monospace';
+
+  for (let i = 0; i <= 10; i++) {
+    const x = (i / 10) * chart.width;
+    const val = Math.round(minX + (i / 10) * xRange);
+
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, chart.height);
+    ctx.stroke();
+
+    ctx.fillText(val, x + 2, chart.height - 5);
+  }
+
+  selectedMetrics.forEach((metric, metricIndex) => {
+    const values = rows
+      .map(r => r[metric])
+      .filter(v => typeof v === 'number');
+
+    if (!values.length) return;
+
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const range = max - min || 1;
+
+    ctx.beginPath();
+    ctx.strokeStyle = colors[metricIndex % colors.length];
+    ctx.lineWidth = 2;
+
+    rows.forEach((row) => {
+      const xVal = row.frame_idx;
+      const value = row[metric];
+
+      if (typeof value !== 'number') return;
+
+      const x = ((xVal - minX) / xRange) * chart.width;
+      const y = chart.height - ((value - min) / range) * chart.height;
+
+      ctx.lineTo(x, y);
+    });
+
+    ctx.stroke();
+
+    ctx.fillStyle = colors[metricIndex % colors.length];
+    ctx.fillText(metric, 20, 20 + metricIndex * 18);
+  });
+
+  // cursor
+  const cursorX = ((currentFrame - minX) / xRange) * chart.width;
+
+  ctx.beginPath();
+  ctx.strokeStyle = 'white';
+  ctx.lineWidth = 2;
+  ctx.moveTo(cursorX, 0);
+  ctx.lineTo(cursorX, chart.height);
+  ctx.stroke();
+
+  ctx.fillText('frame ' + currentFrame, cursorX + 5, 20);
+}
+
+chart.addEventListener('click', (e) => {
+  if (!selectedBodyPart) return;
+
+  const rect = chart.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+
+  const rows = csvData[selectedBodyPart].rows;
+  const xValues = rows.map(r => r.frame_idx);
+
+  const minX = Math.min(...xValues);
+  const maxX = Math.max(...xValues);
+
+  const xVal = minX + (x / rect.width) * (maxX - minX);
+
+  currentFrame = Math.round(xVal);
+
+  video.currentTime = currentFrame / FPS;
+
+  drawChart();
+});
+</script>
+
+</body>
+</html>

@@ -3,14 +3,25 @@ from data_model.frame import Frame
 from data_model.frame_normalization import FrameNormalization
 import math
 import numpy as np
-from config import SMOOTHING_WINDOW
+from config import SMOOTHING_WINDOW, MAX_UPDATE_DIST_CONFIG, ALPHA_CONFIG
+import copy
+
 class PersonGesture:
-    def __init__(self, person_id,origin="LHip",gesture_analysis=None):
+    def __init__(self, person_id, origin="MidHip", gesture_analysis=None):
         self.person_id = person_id
         self.gesture_analysis = gesture_analysis
-        self.body = {part: BodyPart(part, person_id,self.gesture_analysis) for part in self.gesture_analysis.COCO_PARTS}
-        self.left_hand = {f"L_{part}": BodyPart(f"L_{part}",person_id,self.gesture_analysis) for part in self.gesture_analysis.HAND_PARTS}
-        self.right_hand = {f"R_{part}": BodyPart(f"R_{part}", person_id,self.gesture_analysis) for part in self.gesture_analysis.HAND_PARTS}
+        self.body = {
+            part: BodyPart(part, person_id, self.gesture_analysis)
+            for part in self.gesture_analysis.COCO_PARTS
+        }
+        self.left_hand = {
+            f"L_{part}": BodyPart(f"L_{part}", person_id, self.gesture_analysis)
+            for part in self.gesture_analysis.HAND_PARTS
+        }
+        self.right_hand = {
+            f"R_{part}": BodyPart(f"R_{part}", person_id, self.gesture_analysis)
+            for part in self.gesture_analysis.HAND_PARTS
+        }
         self.origin_part = origin
 
     # def build_reference_data(self):
@@ -22,7 +33,7 @@ class PersonGesture:
     #             lengths.append(self.get_shoulder_length(frame_idx))
     #         if self.body[self.origin_part].frames[frame_idx].is_valid():
     #             origins.append(self.get_origin(frame_idx))
-                
+
     #     self.avg_origin_x, self.avg_origin_y = np.median(origins, axis=0)
     #     self.avg_shoulder_length = np.median(lengths)
     def build_average_shoulder_length(self):
@@ -60,19 +71,44 @@ class PersonGesture:
                 last_shoulder_length = shoulder_length
 
             # Only create normalization if we have valid data
-            if (last_x_origin is None or
-                last_y_origin is None or
-                last_shoulder_length is None):
+            if (
+                last_x_origin is None
+                or last_y_origin is None
+                or last_shoulder_length is None
+            ):
                 continue  # skip until we have a baseline
 
             self.normalization_data[frame_idx] = FrameNormalization(
-                frame_idx,
-                last_x_origin,
-                last_y_origin,
-                last_shoulder_length
+                frame_idx, last_x_origin, last_y_origin, last_shoulder_length
             )
+
     def shoulders_confident(self, frame_idx):
-        return self.body["RShoulder"].frames[frame_idx].is_valid() and self.body["LShoulder"].frames[frame_idx].is_valid()
+        return (
+            self.body["RShoulder"].frames[frame_idx].is_valid()
+            and self.body["LShoulder"].frames[frame_idx].is_valid()
+        )
+    
+    def build_all_data_debug_smooth(self, smoothing_windows):
+        temp_part = None
+        part_list = []
+        
+        for window in smoothing_windows:
+            self.smooth_person_keypoints(window)
+            self.build_reference_data()
+            self.normalize_all_parts()
+            self.compute_baseline_all_parts()
+            self.build_magnitudes_all_parts()
+            temp_part = self.get_body_part("LWrist")
+            part_list.append(copy.deepcopy(temp_part))
+
+        return part_list
+    def build_all_data_debug_baseline(self):
+        self.smooth_person_keypoints(window=SMOOTHING_WINDOW)
+        self.build_reference_data()
+        self.normalize_all_parts()
+        self.compute_baseline_all_parts()
+        self.build_magnitudes_all_parts()
+
     def build_all_data(self):
         """
         Build all necessary data for this person gesture.
@@ -95,14 +131,15 @@ class PersonGesture:
             part.update_normalized()
         for part in self.right_hand.values():
             part.update_normalized()
-    
-    def compute_baseline_all_parts(self):
+
+    def compute_baseline_all_parts(self, alpha=ALPHA_CONFIG, max_update_dist=MAX_UPDATE_DIST_CONFIG):
         for part in self.body.values():
-            part.compute_baselines()
+            part.compute_baselines(alpha=alpha, max_update_dist=max_update_dist)
         # for part in self.left_hand.values():
         #     part.update_normalized()
         # for part in self.right_hand.values():
         #     part.update_normalized()
+
     def build_magnitudes_all_parts(self):
         """
         Build magnitudes for all body parts across all frames.
@@ -113,6 +150,7 @@ class PersonGesture:
             part.build_velocities_and_accelerations()
         for part in self.right_hand.values():
             part.build_velocities_and_accelerations()
+
     def add_frame_data(self, frame_idx, keypoint_data):
         """
         Add keypoints for a frame from parsed OpenPose JSON data.
@@ -140,7 +178,6 @@ class PersonGesture:
                 temp_frame = Frame(frame_idx, x, y, c)
                 temp_frame.add_body_part_reference(self.right_hand[pname])
                 self.right_hand[pname].add_keyframe(temp_frame)
-        
 
     def get_body_part(self, part_name):
         """
@@ -158,6 +195,8 @@ class PersonGesture:
         elif part_name in self.right_hand:
             return self.right_hand[part_name]
         return None
+
+    # Not used
     def get_origin_part(self):
         """
         Retrieve a BodyPart object by name.
@@ -178,14 +217,16 @@ class PersonGesture:
             frame_idx (int): Frame number.
         Returns:
             Tuple (x, y) if origin exists, else None.
-        """        
+        """
         origin_part = self.get_body_part(self.origin_part)
+
         if origin_part is None:
             return None
+
         return origin_part.get_coordinates(frame_idx)
 
-# TODO: should these values be normalized? Think about it
-    def get_shoulder_length(self,frame_idx):
+    # TODO: should these values be normalized? Think about it
+    def get_shoulder_length(self, frame_idx):
         """
         Calculate shoulder length at a specific frame index.
 
@@ -203,12 +244,12 @@ class PersonGesture:
         rx, ry = right_shoulder
         lx -= ox
         rx -= ox
-        ly -=oy
+        ly -= oy
         ry -= oy
         return math.hypot(rx - lx, ry - ly)
 
     def smooth_person_keypoints(self, window=3):
-         # Smooth function
+        # Smooth function
         def smooth_array(arr, w):
             smoothed = arr.copy()
             for i in range(n_frames):
@@ -220,6 +261,7 @@ class PersonGesture:
                 else:
                     smoothed[i] = np.nan
             return smoothed
+
         for part_name, body_part in self.body.items():
             # Skip if no frames
             if not body_part.frames:
@@ -236,8 +278,6 @@ class PersonGesture:
             # Replace None with np.nan
             x = np.where(x is None, np.nan, x)
             y = np.where(y is None, np.nan, y)
-
-           
 
             x_smooth = smooth_array(x, window)
             y_smooth = smooth_array(y, window)
@@ -264,8 +304,6 @@ class PersonGesture:
             x = np.where(x is None, np.nan, x)
             y = np.where(y is None, np.nan, y)
 
-            
-
             x_smooth = smooth_array(x, window)
             y_smooth = smooth_array(y, window)
 
@@ -291,8 +329,6 @@ class PersonGesture:
             x = np.where(x is None, np.nan, x)
             y = np.where(y is None, np.nan, y)
 
-            
-
             x_smooth = smooth_array(x, window)
             y_smooth = smooth_array(y, window)
 
@@ -301,10 +337,14 @@ class PersonGesture:
                 frame = body_part.frames[frame_idx]
                 frame.x = x_smooth[idx]
                 frame.y = y_smooth[idx]
-    def get_normalization_data(self, frame_idx):   
+
+    def get_normalization_data(self, frame_idx):
         return self.normalization_data.get(frame_idx, None)
+
     def __repr__(self):
-        return (f"PersonGesture(person_id={self.person_id}, "
-                f"body_parts={len(self.body)}, "
-                f"left_hand_parts={len(self.left_hand)}, "
-                f"right_hand_parts={len(self.right_hand)})")
+        return (
+            f"PersonGesture(person_id={self.person_id}, "
+            f"body_parts={len(self.body)}, "
+            f"left_hand_parts={len(self.left_hand)}, "
+            f"right_hand_parts={len(self.right_hand)})"
+        )

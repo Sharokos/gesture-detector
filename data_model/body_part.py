@@ -254,9 +254,11 @@ class BodyPart:
 
     def compute_baselines(
         self,
-        alpha=0.991,
-        # alpha=0.995,
-        max_update_dist=0.05,
+        alpha=0.998,
+        # alpha=0.997,
+        max_update_dist=0.14,
+        # max_update_dist=0.12,#
+        # Worked pretty ok with the commented values
     ):
         """
         Computes a self-updating baseline using EMA, per frame.

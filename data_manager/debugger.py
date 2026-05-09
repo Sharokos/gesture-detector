@@ -66,19 +66,19 @@ def export_person_features_data(gesture_analysis, person_id, deep_debug, output_
                     row[col] = getattr(feat, col, None)
                 body_data[part].append(row)
 
-            # ---- LEFT HAND ----
-            for part, feat in fm.left_hand_features.items():
-                row = base_info.copy()
-                for col in FEATURE_COLUMNS:
-                    row[col] = getattr(feat, col, None)
-                left_hand_data[part].append(row)
+            # # ---- LEFT HAND ----
+            # for part, feat in fm.left_hand_features.items():
+            #     row = base_info.copy()
+            #     for col in FEATURE_COLUMNS:
+            #         row[col] = getattr(feat, col, None)
+            #     left_hand_data[part].append(row)
 
-            # ---- RIGHT HAND ----
-            for part, feat in fm.right_hand_features.items():
-                row = base_info.copy()
-                for col in FEATURE_COLUMNS:
-                    row[col] = getattr(feat, col, None)
-                right_hand_data[part].append(row)
+            # # ---- RIGHT HAND ----
+            # for part, feat in fm.right_hand_features.items():
+            #     row = base_info.copy()
+            #     for col in FEATURE_COLUMNS:
+            #         row[col] = getattr(feat, col, None)
+            #     right_hand_data[part].append(row)
 
         # ---- FEATURES MANAGER OVERVIEW ----
         mgr_row = base_info.copy()
@@ -100,48 +100,48 @@ def export_person_features_data(gesture_analysis, person_id, deep_debug, output_
         # ----------------------------
         # Write LEFT HAND excel
         # ----------------------------
-        with pd.ExcelWriter(os.path.join(output_dir,"left_hand.xlsx"), engine="openpyxl") as writer:
-            overview_rows = []
+        # with pd.ExcelWriter(os.path.join(output_dir,"left_hand.xlsx"), engine="openpyxl") as writer:
+        #     overview_rows = []
 
-            for part, rows in left_hand_data.items():
-                df = pd.DataFrame(rows)
-                df.to_excel(writer, sheet_name=_safe_sheet_name(part), index=False)
+        #     for part, rows in left_hand_data.items():
+        #         df = pd.DataFrame(rows)
+        #         df.to_excel(writer, sheet_name=_safe_sheet_name(part), index=False)
 
-                overview = df[FEATURE_COLUMNS].mean().to_dict()
-                overview.update({
-                    "window_id": "mean",
-                    "start_frame": "",
-                    "part": part
-                })
-                overview_rows.append(overview)
+        #         overview = df[FEATURE_COLUMNS].mean().to_dict()
+        #         overview.update({
+        #             "window_id": "mean",
+        #             "start_frame": "",
+        #             "part": part
+        #         })
+        #         overview_rows.append(overview)
 
-            if overview_rows:
-                pd.DataFrame(overview_rows).to_excel(
-                    writer, sheet_name="overview", index=False
-                )
+        #     if overview_rows:
+        #         pd.DataFrame(overview_rows).to_excel(
+        #             writer, sheet_name="overview", index=False
+        #         )
 
         # ----------------------------
         # Write RIGHT HAND excel
         # ----------------------------
-        with pd.ExcelWriter(os.path.join(output_dir,"right_hand.xlsx"), engine="openpyxl") as writer:
-            overview_rows = []
+        # with pd.ExcelWriter(os.path.join(output_dir,"right_hand.xlsx"), engine="openpyxl") as writer:
+        #     overview_rows = []
 
-            for part, rows in right_hand_data.items():
-                df = pd.DataFrame(rows)
-                df.to_excel(writer, sheet_name=_safe_sheet_name(part), index=False)
+        #     for part, rows in right_hand_data.items():
+        #         df = pd.DataFrame(rows)
+        #         df.to_excel(writer, sheet_name=_safe_sheet_name(part), index=False)
 
-                overview = df[FEATURE_COLUMNS].mean().to_dict()
-                overview.update({
-                    "window_id": "mean",
-                    "start_frame": "",
-                    "part": part
-                })
-                overview_rows.append(overview)
+        #         overview = df[FEATURE_COLUMNS].mean().to_dict()
+        #         overview.update({
+        #             "window_id": "mean",
+        #             "start_frame": "",
+        #             "part": part
+        #         })
+        #         overview_rows.append(overview)
 
-        if overview_rows:
-            pd.DataFrame(overview_rows).to_excel(
-                writer, sheet_name="overview", index=False
-            )
+        #     if overview_rows:
+        #         pd.DataFrame(overview_rows).to_excel(
+        #             writer, sheet_name="overview", index=False
+        #         )
 
     # ----------------------------
     # Write FEATURES MANAGER overview
@@ -153,6 +153,7 @@ def export_person_features_data(gesture_analysis, person_id, deep_debug, output_
  
                 
 def export_person_bodyparts_data(gesture_analysis, person_id, deep_debug, output_dir=None, ):
+
     output_dir = os.path.join(output_dir,"bodypart_csvs")
     os.makedirs(output_dir, exist_ok=True)
     saved_files = []
@@ -251,3 +252,71 @@ def export_person_bodyparts_data(gesture_analysis, person_id, deep_debug, output
                 print(f"Exported {len(df)} frames for {part_name} -> {csv_file}")
 
     return saved_files
+
+def export_smoothing_window_parts_csv(
+    part_list,
+    smoothing_windows,
+    output_dir,
+    part_name="LWrist",
+    person_id="0"
+):
+    """
+    Exports multiple versions of a body part (from different smoothing windows)
+    into a single CSV for comparison.
+    """
+
+    output_dir = os.path.join(output_dir, "smoothing_debug_csvs")
+    os.makedirs(output_dir, exist_ok=True)
+
+    all_rows = []
+
+    for window, body_part in zip(smoothing_windows, part_list):
+
+        if body_part is None:
+            continue
+
+        for frame_idx, frame in body_part.frames.items():
+
+            vx, vy = body_part.get_velocity_vector(frame_idx)
+            v_mag = body_part.get_velocity_magnitude(frame_idx)
+
+            bx, by = body_part.baselines.get(frame_idx, (0, 0))
+
+            x_norm, y_norm = body_part.get_normalized_coordinates(frame_idx)
+            if x_norm is None:
+                x_norm = 0
+            if y_norm is None:
+                y_norm = 0
+
+            all_rows.append({
+                "window": window,
+                "frame_idx": frame_idx,
+                "x": frame.x,
+                "y": frame.y,
+                "x_normalized": x_norm,
+                "y_normalized": y_norm,
+                "vx": vx,
+                "vy": vy,
+                "velocity_magnitude": v_mag,
+                "baseline_x": bx,
+                "baseline_y": by,
+                "confidence": frame.confidence
+            })
+
+    df = pd.DataFrame(all_rows)
+
+    if df.empty:
+        print("No data to export for smoothing debug.")
+        return None
+
+    df = df.sort_values(["window", "frame_idx"]).reset_index(drop=True)
+
+    file_path = os.path.join(
+        output_dir,
+        f"{person_id}_{part_name}_smoothing_comparison.csv"
+    )
+
+    df.to_csv(file_path, index=False)
+
+    print(f"Saved smoothing comparison CSV → {file_path}")
+    return file_path
