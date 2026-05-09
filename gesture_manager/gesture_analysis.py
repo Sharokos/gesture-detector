@@ -12,7 +12,6 @@ from config import (
 import csv
 import os
 import numpy as np
-from skimage.filters import threshold_otsu
 from data_manager.debugger import export_smoothing_window_parts_csv
 from data_convertor import json_to_eaf
 class GestureAnalysis:
