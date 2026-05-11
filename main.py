@@ -10,7 +10,7 @@ from data_manager.plotter import (
 )
 from config import OPEN_POSE_DIR, GESTURE_DETECTION, GENERATE_JSONS, RESOLUTION, INPUT_DIR
 from data_convertor import eaf_to_json, json_to_eaf
-from utility import get_video_frame_count
+from utility import get_video_frame_rate
 eaf_path = r"D:\DATA\U_SAOM\Work\Misc\GD\Output_Json_Mai\EAF\Emotional_LA_Pianist_L2_EM_AV_FS_P31.eaf"
 json_output = r"D:\DATA\U_SAOM\Work\Misc\GD\Output_Json_Mai\EAF\Emotional_LA_Pianist_L2_EM_AV_FS_P31.json"
 json_path =r"D:\DATA\U_SAOM\Work\Misc\GD\Output_Json_Mai\EAF\Emotional_LA_Pianist_L2_EM_AV_FS_P31.json"
@@ -74,7 +74,7 @@ for subdir in os.listdir(INPUT_ROOT):
         os.makedirs(output_path, exist_ok=True)
 
         try:
-            video_fps = get_video_frame_count(video_path)
+            video_fps = get_video_frame_rate(video_path)
 
             print(f"\nProcessing video: {video_path}")
             print(f"Detected FPS: {video_fps}")
@@ -97,7 +97,7 @@ for subdir in os.listdir(INPUT_ROOT):
 
         # --- GESTURE DETECTION ---
         if GESTURE_DETECTION:
-            print(f"Processing (Gesture detection): {video_file}")
+            print(f"Processing (Gesture detection): {json_dir}")
 
             gesture_analysis = GestureAnalysis(
                 input_folder=json_dir,
