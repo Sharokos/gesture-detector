@@ -11,13 +11,7 @@ from data_manager.plotter import (
 from config import OPEN_POSE_DIR, GESTURE_DETECTION, GENERATE_JSONS, RESOLUTION, INPUT_DIR
 from data_convertor import eaf_to_json, json_to_eaf
 from utility import get_video_frame_rate
-eaf_path = r"D:\DATA\U_SAOM\Work\Misc\GD\Output_Json_Mai\EAF\Emotional_LA_Pianist_L2_EM_AV_FS_P31.eaf"
-json_output = r"D:\DATA\U_SAOM\Work\Misc\GD\Output_Json_Mai\EAF\Emotional_LA_Pianist_L2_EM_AV_FS_P31.json"
-json_path =r"D:\DATA\U_SAOM\Work\Misc\GD\Output_Json_Mai\EAF\Emotional_LA_Pianist_L2_EM_AV_FS_P31.json"
-eaf_output = r"D:\DATA\U_SAOM\Work\Misc\GD\Output_Json_Mai\EAF\Emotional_LA_Pianist_L2_EM_AV_FS_P31_test.eaf"
 
-# eaf_to_json(eaf_path, json_path)
-# exit()
 
 DEBUG_FLAG = True
 DEEP_DEBUG = False
@@ -39,7 +33,7 @@ VIDEO_EXTENSIONS = (".mp4", ".avi", ".mov", ".mkv")
 input_dir = INPUT_ROOT
 
 if not os.path.isdir(input_dir):
-    continue
+    exit()
 
 # Find ALL videos in this subdir
 video_files = [
@@ -49,7 +43,7 @@ video_files = [
 
 if not video_files:
     print(f"No videos found in {input_dir}")
-    continue
+    exit()
 
 # Process EACH video
 for video_file in video_files:
