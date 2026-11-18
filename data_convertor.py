@@ -1,6 +1,8 @@
 import xml.etree.ElementTree as ET
 from datetime import datetime
+from pathlib import Path
 import json
+import os
 import uuid
 
 def parse_time_slots(root):
@@ -88,8 +90,33 @@ def build_tier(gestures, time_slot_map, tier_id="Gesture_Unit"):
     return tier
 
 
-def json_to_eaf(gestures, output_path):
-    """Main conversion function."""
+_MIME_TYPES = {
+    ".mp4": "video/mp4",
+    ".mov": "video/quicktime",
+    ".avi": "video/x-msvideo",
+    ".mkv": "video/x-matroska",
+    ".mpg": "video/mpeg",
+    ".mpeg": "video/mpeg",
+    ".wav": "audio/x-wav",
+}
+
+
+def _add_media_descriptor(header, media_path, output_path):
+    media = Path(media_path).resolve()
+    attrs = {
+        "MEDIA_URL": media.as_uri(),
+        "MIME_TYPE": _MIME_TYPES.get(media.suffix.lower(), "unknown"),
+    }
+    try:
+        rel = os.path.relpath(media, Path(output_path).resolve().parent)
+        attrs["RELATIVE_MEDIA_URL"] = "./" + Path(rel).as_posix()
+    except ValueError:
+        pass  # different drives on Windows: no relative path possible
+    ET.SubElement(header, "MEDIA_DESCRIPTOR", attrs)
+
+
+def json_to_eaf(gestures, output_path, media_path=None):
+    """Main conversion function. `media_path` links the video so ELAN opens it with the annotations."""
 
     # Register xsi namespace
     ET.register_namespace("xsi", "http://www.w3.org/2001/XMLSchema-instance")
@@ -111,6 +138,9 @@ def json_to_eaf(gestures, output_path):
         "MEDIA_FILE": "",
         "TIME_UNITS": "milliseconds"
     })
+
+    if media_path:
+        _add_media_descriptor(header, media_path, output_path)
 
     urn_prop = ET.SubElement(header, "PROPERTY", {
         "NAME": "URN"

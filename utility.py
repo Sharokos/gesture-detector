@@ -5,12 +5,20 @@ import plotly.graph_objs as go
 import cv2
 
 def get_video_frame_rate(video_path):
+    return get_video_info(video_path)[0]
+
+
+def get_video_info(video_path):
+    """Returns (fps, frame_count)."""
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
         raise RuntimeError(f"Could not open video: {video_path}")
     fps = float(cap.get(cv2.CAP_PROP_FPS))
+    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     cap.release()
-    return fps
+    if not fps or fps <= 0:
+        raise RuntimeError(f"Could not read the frame rate of {video_path}")
+    return fps, frame_count
 
 # def get_person_by_id(person_id):
 #     """

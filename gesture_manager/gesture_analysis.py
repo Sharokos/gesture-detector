@@ -2,12 +2,21 @@ from gesture_manager.sliding_window import SlidingWindow
 from data_manager.exporter import export_gesture_groups_to_json
 from data_manager import input_parser
 import numbers
-from math_utility import remove_outliers_mad
+from math_utility import remove_outliers_mad, log_otsu_threshold, otsu_threshold
 from config import (
+    COCO_PARTS,
+    HAND_PARTS,
     TEMPORAL_GAP,
     SCORE_THRESHOLD,
     MIN_WINDOW_THRESHOLD,
     MAX_NUMBER_OF_HOLD_WINDOWS,
+    SLIDING_WINDOW_SIZE,
+    SLIDING_WINDOW_STEP,
+    THRESHOLD_METHOD,
+    SCORE_PERCENTILE,
+    DISTANCE_PERCENTILE,
+    SCORE_THRESHOLD_FACTOR,
+    frames_at_fps,
 )
 import csv
 import os
@@ -15,43 +24,8 @@ import numpy as np
 from data_manager.debugger import export_smoothing_window_parts_csv
 from data_convertor import json_to_eaf
 class GestureAnalysis:
-    np.seterr(all="ignore")
-    # COCO body parts minimal
-    COCO_PARTS = [
-        "Neck",
-        "RShoulder",
-        "RElbow",
-        "RWrist",
-        "LShoulder",
-        "LElbow",
-        "LWrist",
-        "MidHip",
-        "RHip",
-        "LHip",
-    ]
-    HAND_PARTS = [
-        "Wrist",
-        "Thumb_1",
-        "Thumb_2",
-        "Thumb_3",
-        "Thumb_4",
-        "Index_1",
-        "Index_2",
-        "Index_3",
-        "Index_4",
-        "Middle_1",
-        "Middle_2",
-        "Middle_3",
-        "Middle_4",
-        "Ring_1",
-        "Ring_2",
-        "Ring_3",
-        "Ring_4",
-        "Pinky_1",
-        "Pinky_2",
-        "Pinky_3",
-        "Pinky_4",
-    ]
+    COCO_PARTS = COCO_PARTS
+    HAND_PARTS = HAND_PARTS
 
     def __init__(self, input_folder, frame_rate = 30):
         self.input_folder = input_folder
@@ -60,9 +34,13 @@ class GestureAnalysis:
         self.number_of_frames = 0
         # There will always be only one instance of gesture_analysis per video, so it's safe to store the FPS
         self.frame_rate = frame_rate
+        # Frame-based settings are defined at REFERENCE_FPS; convert them to this video's FPS
+        self.window_size = frames_at_fps(SLIDING_WINDOW_SIZE, frame_rate)
+        self.step_size = frames_at_fps(SLIDING_WINDOW_STEP, frame_rate)
+        self.temporal_gap = frames_at_fps(TEMPORAL_GAP, frame_rate)
         input_parser.parse_openpose_and_populate_persons(gesture_analysis=self)
-        print(f"Detected {len(self.persons)} persons")
-    
+        print(f"Parsed {self.number_of_frames} frames")
+
     def execute_debug(self):
         smoothing_windows = [5]
         part_list = self.build_all_data_debug(smoothing_windows)
@@ -78,8 +56,8 @@ class GestureAnalysis:
         """
         for person in self.persons.values():
             total_frames = self.number_of_frames
-            window_size = SlidingWindow.WINDOW_SIZE
-            step_size = SlidingWindow.STEP_SIZE
+            window_size = self.window_size
+            step_size = self.step_size
 
             for start in range(0, total_frames - window_size + 1, step_size):
                 end = start + window_size - 1
@@ -101,62 +79,75 @@ class GestureAnalysis:
     def build_all_data_debug(self, smoothing_windows):
         return self.persons[0].build_all_data_debug_smooth(smoothing_windows)
     
-    def determine_gestures_for_person(self, person_id, output_path=None):
-        scores = []
-        distances = []
+    @staticmethod
+    def compute_thresholds(scores, distances, method=THRESHOLD_METHOD):
+        """
+        Per-video thresholds for the score and the wrist-to-rest distance.
+
+        "otsu" looks for the natural split between rest and movement, so a calm video gets few
+        gestures and a busy one gets many. "percentile" (the old behaviour) always marks about the
+        same fraction of every video, whatever happens in it.
+        """
+        scores = np.asarray(scores, dtype=float)
+        distances = np.asarray(distances, dtype=float)
+        if method == "otsu":
+            try:
+                return log_otsu_threshold(scores), otsu_threshold(distances)
+            except ValueError as e:
+                print(f"WARNING: Otsu thresholding failed ({e}), falling back to percentiles")
+        if len(scores) == 0:
+            return SCORE_THRESHOLD, 0.05
+        return (
+            float(np.percentile(scores, SCORE_PERCENTILE)),
+            float(np.percentile(distances, DISTANCE_PERCENTILE)),
+        )
+
+    def determine_gestures_for_person(self, person_id, output_path=None, media_path=None):
         self.clean_features_outliers_for_person(person_id)
-        # Keep only the sliding windows of that person
         person_windows = self.get_windows_for_person(person_id)
         for w in person_windows:
             w.recompute_score()
-            scores.append(w.score)
-            distances.append(w.features_manager.mean_baseline_distance)
-        try:
-            scores = np.array(scores)
-            distances = np.array(distances)
-            # Lowering the thresholds just a tad
-            # threshold = 0.85 * threshold_otsu(scores)
-            # threshold_distances = 0.55 * threshold_otsu(distances)
-            threshold = np.percentile(scores, 60)
-            threshold_distances = np.percentile(distances, 70)
-            for w in person_windows:
-                w.threshold = threshold
-                w.distance_threhsold = threshold_distances
-            print(f"Threshold with otsu is: {threshold}")
-        except Exception as e:
-            print("WARNING: Using config threshold!!!")
-            threshold = SCORE_THRESHOLD
-            threshold_distances = 0.05
 
-        # Keep only sliding windows marked as containing gestures
-        # gesture_windows = [w for w in person_windows if w.contains_gesture(threshold)]
+        # Windows at the very start are ignored by the detector, keep them out of the statistics too
+        settled = [w for w in person_windows if w.start_frame > 2 * self.window_size] or person_windows
+        threshold, threshold_distances = self.compute_thresholds(
+            [w.score for w in settled],
+            [w.features_manager.mean_baseline_distance for w in settled],
+        )
+        threshold *= SCORE_THRESHOLD_FACTOR
+        for w in person_windows:
+            w.threshold = threshold
+            w.distance_threhsold = threshold_distances
+        print(f"Score threshold ({THRESHOLD_METHOD}): {threshold:.4f}, "
+              f"hold distance threshold: {threshold_distances:.4f}")
 
-        # TODO: intersting idea. Parse all windows and have a more complex way of determining if it contains gesture.
-        # For example: if the prev window has a high acc/vel/score and the current one not, check if baseline distance is high at the moment. Most probably the person is holding the gesture.
-        # How to extend this to the next windows? If the baseline distance remains the same as the prev... but until when? Ugh... to be seen
-        # ================== TEMP TESTING =====================================
         segments = self.detect_gesture_segments(
             person_windows,
             start_thresh=threshold,
             hold_distance_thresh=threshold_distances,
             min_length=1,
         )
+        for w in person_windows:
+            w.in_gesture = False
+            w.is_gesture = 0
         for segment in segments:
             for w in segment:
-                w.is_gesture = threshold + 0.05
-        gesture_windows = [w for w in person_windows if w.is_gesture == threshold + 0.05]
-        # ===================================================================
+                w.in_gesture = True
+                w.is_gesture = threshold + 0.05  # value only used to draw it in the debug plot
+        gesture_windows = [w for w in person_windows if w.in_gesture]
+
         print(f"\nPerson {person_id}: Detected {len(gesture_windows)} gesture windows")
         gesture_groups = self.merge_gesture_windows(
             gesture_windows,
-            max_temporal_gap=TEMPORAL_GAP,
+            max_temporal_gap=self.temporal_gap,
         )
         filtered_gesture_groups = self.filter_gestures(gesture_groups)
         # Export to JSON for video helper
         gestures = export_gesture_groups_to_json(
             self, filtered_gesture_groups, os.path.join(output_path, "gestures.json")
         )
-        json_to_eaf(gestures, os.path.join(output_path, "gestures.eaf"))
+        json_to_eaf(gestures, os.path.join(output_path, "gestures.eaf"), media_path=media_path)
+        return gestures
 
     def get_windows_for_person(self, person_id):
         person_windows = []
@@ -415,7 +406,7 @@ class GestureAnalysis:
         hold_count = 0
 
         for i, w in enumerate(person_windows):
-            if w.start_frame <= 2 * SlidingWindow.WINDOW_SIZE:
+            if w.start_frame <= 2 * self.window_size:
                 continue
 
             score = w.score
