@@ -1,4 +1,5 @@
 import json
+import os
 
 def export_gesture_groups_to_json(gesture_analysis, gesture_groups, output_file=None):
         """
@@ -34,6 +35,7 @@ def export_gesture_groups_to_json(gesture_analysis, gesture_groups, output_file=
             })
         
         # Write to JSON
+        os.makedirs(os.path.dirname(os.path.abspath(output_file)), exist_ok=True)
         with open(output_file, 'w') as jsonfile:
             json.dump(gestures, jsonfile, indent=2)
         

@@ -1,323 +1,243 @@
-import math
 import numpy as np
+import pandas as pd
 
 from data_model.frame import Frame
-from math_utility import smooth_keypoints
-from config import SMOOTHING_WINDOW
+from config import REFERENCE_FPS
+
+
+def fill_short_gaps(a, max_gap):
+    """Linearly interpolate runs of NaN that are at most `max_gap` long (inside the signal only)."""
+    s = pd.Series(a)
+    isna = s.isna()
+    if not isna.any() or isna.all():
+        return a.copy()
+    run_id = (isna != isna.shift()).cumsum()
+    run_len = isna.groupby(run_id).transform("sum")
+    interp = s.interpolate(limit_area="inside")
+    fill = (isna & (run_len <= max_gap)).to_numpy()
+    out = a.copy()
+    out[fill] = interp.to_numpy()[fill]
+    return out
+
+
+def centered_nanmean(a, half_window):
+    """Centered moving average over [i - w, i + w] ignoring NaN (same as the old loop-based smoothing)."""
+    if half_window <= 0 or len(a) == 0:
+        return a.copy()
+    return (
+        pd.Series(a)
+        .rolling(2 * half_window + 1, center=True, min_periods=1)
+        .mean()
+        .to_numpy(copy=True)  # pandas 3 returns read-only views otherwise
+    )
 
 
 class BodyPart:
-    def __init__(self, part_name, person_id, gesture_analysis=None):
-        """
-        Initialize a BodyPart to track a single keypoint across frames.
+    """
+    One keypoint tracked across the whole video. Data is stored as numpy arrays indexed by frame
+    number (NaN = missing / not confident).
+    """
 
-        Args:
-            part_name (str): Name of the keypoint (e.g., "RWrist", "Thumb_4").
-        """
+    def __init__(self, part_name, person_id, gesture_analysis=None):
         self.part_name = part_name
         self.person_id = person_id
         self.gesture_analysis = gesture_analysis
-        self.frames = {}  # dict[int, Frame]
-        self.velocities = []
-        self.accelerations = []
 
-    def get_coordinates(self, frame_idx):
-        """
-        Get the (x, y) coordinates for a specific frame index.
-
-        Args:
-            frame_idx (int): Frame number.
-        Returns:
-            Tuple (x, y) if frame exists, else None.
-        """
-        frame = self.frames.get(frame_idx)
-        if frame is None:
-            return (None, None)
-        # if not self.confident(frame_idx):
-        #     return None
-        return (frame.x, frame.y)
-
-    def get_normalized_coordinates(self, frame_idx):
-        """
-        Get normalized (x, y) coordinates for a specific frame index.
-
-        Args:
-            frame_idx (int): Frame number.
-        Returns:
-
-            Tuple (x_normalized, y_normalized) if frame exists, else None.
-        """
-        frame = self.frames.get(frame_idx)
-        if frame is None:
-            return (None, None)
-        if not self.confident(frame_idx):
-            return (None, None)
-        return (frame.x_normalized, frame.y_normalized)
-        # return (frame.x, frame.y)
-
-    def compute_velocity_magnitude(self, frame_idx):
-        """
-        Get the precomputed velocity magnitude for a frame. If internal arrays are dirty,
-        rebuild velocities and accelerations first. Returns 0.0 when value is not available.
-        Args:
-            frame_idx (int): Frame number.
-        Returns:
-            Float: velocity magnitude, or 0.0 if not computable.
-        """
-        # Ensure arrays up to date
-        if getattr(self, "_dirty", True):
-            self.build_velocities_and_accelerations()
-
-        if frame_idx < 0 or frame_idx >= len(self.velocities):
-            return 0.0
-
-        val = self.velocities[frame_idx]
-        if not self.confident(frame_idx):
-            return 0.0
-        try:
-            if np.isnan(val):
-                return 0.0
-        except Exception:
-            pass
-        return float(val)
-
-    def get_velocity_vector(self, frame_idx):
-        # TODO: not relevant for now. Only used in plotting and in a parameter not calculated yet.
-        """
-        Returns (vx, vy) for the given frame index (velocity resolved in normalized units per second).
-        If not available, returns (0.0, 0.0).
-        """
-        if getattr(self, "_dirty", True):
-            self.build_velocities_and_accelerations()
-
-        if not hasattr(self, "vx") or frame_idx < 0 or frame_idx >= len(self.vx):
-            return (0.0, 0.0)
-
-        vx = self.vx[frame_idx]
-        vy = self.vy[frame_idx]
-
-        if np.isnan(vx) or np.isnan(vy):
-            return (0.0, 0.0)
-        if not self.confident(frame_idx):
-            return (0.0, 0.0)
-        return (float(vx), float(vy))
-
-    def get_velocity_magnitude(self, frame_idx):
-        """
-        Backwards-compatible wrapper to retrieve velocity magnitude as float.
-        """
-        return self.compute_velocity_magnitude(frame_idx)
-
-    def get_acceleration_magnitude(self, frame_idx):
-        """
-        Backwards-compatible wrapper to retrieve acceleration magnitude as float.
-        """
-        if getattr(self, "_dirty", True):
-            self.build_velocities_and_accelerations()
-        if frame_idx < 0 or frame_idx >= len(self.accelerations):
-            return 0.0
-        val = self.accelerations[frame_idx]
-        if not self.confident(frame_idx):
-            return 0.0
-        if np.isnan(val):
-            return 0.0
-        return float(val)
-
-    def compute_acceleration_magnitude(self, frame_idx):
-        """
-        Compute acceleration magnitude using precomputed arrays (kept for compatibility).
-        """
-        return self.get_acceleration_magnitude(frame_idx)
-
-    def build_velocities_and_accelerations(self, fps=None):
-        """
-        Build velocity (vx, vy) and acceleration arrays for the frames of this body part.
-
-        Implementation notes:
-        - Uses frame indices as timestamps (frame_no / fps)
-        - Handles missing frames by using NaN placeholders
-        - Velocity is stored at the later frame index of an interval (i.e., velocity between i-1 and i is stored at i)
-        - Acceleration is stored at the later frame index of the velocity interval
-        """
-
-        fps = fps or getattr(
-            self.gesture_analysis, "frame_rate", getattr(Frame, "FRAME_RATE", 24)
-        )
-
-        if not self.frames:
-            self.vx = np.array([], dtype=float)
-            self.vy = np.array([], dtype=float)
-            self.velocities = np.array([], dtype=float)
-            self.accelerations = np.array([], dtype=float)
-            self._dirty = False
-            return
-
-        max_frame = max(self.frames.keys())
-        n = max_frame + 1
-
-        x = np.full(n, np.nan, dtype=float)
-        y = np.full(n, np.nan, dtype=float)
-
-        for idx, f in self.frames.items():
-            # x[idx] = f.x_normalized
-            # y[idx] = f.y_normalized
-            if self.get_normalized_coordinates(idx) is not None:
-                x[idx], y[idx] = self.get_normalized_coordinates(idx)
-            else:
-                x[idx] = np.nan
-                y[idx] = np.nan
-        # x = smooth_signal(x, window=3)
-        # y = smooth_signal(y, window=3)
-        valid = ~np.isnan(x) & ~np.isnan(y)
-        idxs = np.nonzero(valid)[0]
-
-        vx = np.full(n, np.nan, dtype=float)
-        vy = np.full(n, np.nan, dtype=float)
-        vel = np.full(n, np.nan, dtype=float)
-        acc = np.full(n, np.nan, dtype=float)
-
-        if len(idxs) >= 2:
-            # compute per-interval dt (in seconds)
-            dt = np.diff(idxs)  # / float(fps)
-            dx = np.diff(x[idxs])
-            dy = np.diff(y[idxs])
-
-            # velocity components per interval
-            vx_intervals = dx / dt
-            vy_intervals = dy / dt
-            mag_intervals = np.hypot(vx_intervals, vy_intervals)
-
-            # store velocity at the later frame index of each interval
-            vx[idxs[1:]] = vx_intervals
-            vy[idxs[1:]] = vy_intervals
-            vel[idxs[1:]] = mag_intervals
-
-            # acceleration between successive velocity intervals
-            if len(mag_intervals) >= 2:
-                dv = np.diff(mag_intervals)
-                dt2 = np.diff(idxs[1:]) / float(fps)
-                acc_vals = np.abs(dv / dt2)
-                acc[idxs[1:][1:]] = acc_vals
-
-        # Assign arrays
-        self.vx = vx
-        self.vy = vy
-        self.velocities = smooth_keypoints(vel, SMOOTHING_WINDOW)
-        self.accelerations = smooth_keypoints(acc, SMOOTHING_WINDOW)
-        self._dirty = False
-
-    # def update_normalized(self):
-    #     person = self.gesture_analysis.get_person_by_id(self.person_id)
-    #     for frame in self.frames.values():
-    #         frame.update_normalized(
-    #             person.avg_origin_x,
-    #             person.avg_origin_y,
-    #             person.avg_shoulder_length
-    #         )
-    #     # Mark arrays as stale
-    #     self._dirty = True
-
-    def confident(self, frame_idx, confidence_threshold=0.6):
-        """
-        Returns whether the frame at frame_idx has a confidence score above the threshold.
-        """
-        frame = self.frames.get(frame_idx)
-        if frame is None:
-            return False
-        return frame.is_valid(confidence_threshold)
-
-    def add_keyframe(self, frame):
-        """
-        Add or update a frame observation.
-
-        Args:
-            frame (Frame): Frame object.
-        """
-        # store by frame_no for O(1) lookup
-        frame.add_body_part_reference(self)
-        self.frames[frame.frame_no] = frame
-        # Mark cached arrays as stale
-        self._dirty = True
-
-    def update_normalized(self):
-        person = self.gesture_analysis.get_person_by_id(self.person_id)
-        for frame in self.frames.values():
-            normalization_data = person.get_normalization_data(frame.frame_no)
-            if normalization_data is None:
-                continue
-            frame.update_normalized(
-                normalization_data.x_origin,
-                normalization_data.y_origin,
-                normalization_data.shoulder_length,
-            )
-        self._dirty = True
-
-    def compute_baselines(
-        self,
-        alpha=0.998,
-        # alpha=0.997,
-        max_update_dist=0.14,
-        # max_update_dist=0.12,#
-        # Worked pretty ok with the commented values
-    ):
-        """
-        Computes a self-updating baseline using EMA, per frame.
-
-        Parameters
-        ----------
-        alpha : float
-            EMA smoothing factor (close to 1 = slow baseline)
-        max_update_dist : float
-            Max distance from baseline to allow baseline update.
-            Prevents gestures from polluting baseline.
-        """
-
+        empty = np.array([], dtype=float)
+        self.raw_x = self.raw_y = self.conf = empty
+        self.x = self.y = empty          # cleaned + smoothed pixel coordinates
+        self.valid = np.array([], dtype=bool)
+        self.xn = self.yn = empty        # normalized coordinates
+        self.vx = self.vy = empty
+        self.velocities = empty
+        self.accelerations = empty
+        self.baseline_x = self.baseline_y = empty
         self.baselines = {}
+        self._vel_m = self._acc_m = self._vx_m = self._vy_m = empty
+        self._frames = None
 
-        if not self.frames:
-            return
-
-        frame_indices = sorted(self.frames.keys())
-
-        # Initialize baseline from first valid frame
-        baseline_x = None
-        baseline_y = None
-
-        for frame_idx in frame_indices:
-            # frame = self.frames[frame_idx]
-            x_normalized, y_normalized = self.get_normalized_coordinates(frame_idx)
-            if x_normalized is None or y_normalized is None:
-                continue
-
-            if baseline_x is None:
-                baseline_x = x_normalized
-                baseline_y = y_normalized
-                self.baselines[frame_idx] = (baseline_x, baseline_y)
-                continue
-
-            dx = x_normalized - baseline_x
-            dy = y_normalized - baseline_y
-            dist = np.hypot(dx, dy)
-            # if self.part_name == "RWrist":
-            #     print(dist)
-            # Only update baseline if movement is small
-            if dist < max_update_dist:
-                # if True:
-                baseline_x = alpha * baseline_x + (1 - alpha) * x_normalized
-                baseline_y = alpha * baseline_y + (1 - alpha) * y_normalized
-
-            # Store baseline (even if frozen)
-            self.baselines[frame_idx] = (baseline_x, baseline_y)
+    # ------------------------------------------------------------------
+    # Building
+    # ------------------------------------------------------------------
+    def set_raw(self, xyc):
+        """xyc: array (n_frames, 3) with x, y, confidence; NaN where the person was not detected."""
+        self.raw_x = xyc[:, 0].astype(float)
+        self.raw_y = xyc[:, 1].astype(float)
+        self.conf = xyc[:, 2].astype(float)
+        self._frames = None
 
     def __len__(self):
-        return len(self.frames)
+        return int(np.count_nonzero(~np.isnan(self.conf)))
+
+    def has_data(self):
+        return len(self) > 0
+
+    def clean_and_smooth(self, conf_threshold, max_gap, half_window):
+        with np.errstate(invalid="ignore"):
+            ok = self.conf >= conf_threshold
+        x = np.where(ok, self.raw_x, np.nan)
+        y = np.where(ok, self.raw_y, np.nan)
+        x = fill_short_gaps(x, max_gap)
+        y = fill_short_gaps(y, max_gap)
+        self.valid = ~np.isnan(x) & ~np.isnan(y)
+        xs = centered_nanmean(x, half_window)
+        ys = centered_nanmean(y, half_window)
+        xs[~self.valid] = np.nan
+        ys[~self.valid] = np.nan
+        self.x, self.y = xs, ys
+        self._frames = None
+
+    def update_normalized(self, x_origin, y_origin, scale):
+        """x_origin / y_origin: per-frame arrays, scale: scalar (e.g. shoulder width in pixels)."""
+        if scale is None or not np.isfinite(scale) or scale == 0:
+            self.xn = np.full_like(self.x, np.nan)
+            self.yn = np.full_like(self.y, np.nan)
+        else:
+            self.xn = (self.x - x_origin) / scale
+            self.yn = (self.y - y_origin) / scale
+        self._frames = None
+
+    def build_velocities_and_accelerations(self, fps=None, half_window=0):
+        """
+        Velocity is expressed in normalized units per REFERENCE frame (i.e. per 1/REFERENCE_FPS s),
+        which keeps the old magnitudes at 30 fps but makes them independent of the video frame rate.
+        Velocity between frames i-1 and i is stored at i. Acceleration = |d velocity| / dt(seconds).
+        """
+        fps = fps or getattr(self.gesture_analysis, "frame_rate", REFERENCE_FPS)
+        n = len(self.xn)
+        vx = np.full(n, np.nan)
+        vy = np.full(n, np.nan)
+        vel = np.full(n, np.nan)
+        acc = np.full(n, np.nan)
+
+        valid = ~np.isnan(self.xn) & ~np.isnan(self.yn)
+        idxs = np.nonzero(valid)[0]
+        if len(idxs) >= 2:
+            dt = np.diff(idxs)
+            scale = fps / REFERENCE_FPS
+            vx_i = np.diff(self.xn[idxs]) / dt * scale
+            vy_i = np.diff(self.yn[idxs]) / dt * scale
+            mag_i = np.hypot(vx_i, vy_i)
+            vx[idxs[1:]] = vx_i
+            vy[idxs[1:]] = vy_i
+            vel[idxs[1:]] = mag_i
+            if len(mag_i) >= 2:
+                dt2 = np.diff(idxs[1:]) / float(fps)
+                acc[idxs[2:]] = np.abs(np.diff(mag_i) / dt2)
+
+        self.vx, self.vy = vx, vy
+        self.velocities = centered_nanmean(vel, half_window)
+        self.accelerations = centered_nanmean(acc, half_window)
+
+        # Masked versions used by the features: 0 where not valid / not computable
+        def masked(a):
+            return np.where(valid & np.isfinite(a), a, 0.0)
+
+        self._vel_m = masked(self.velocities)
+        self._acc_m = masked(self.accelerations)
+        self._vx_m = masked(vx)
+        self._vy_m = masked(vy)
+
+    def compute_baselines(self, alpha=0.998, max_update_dist=0.14, fps=None):
+        """
+        Self-updating rest position (EMA) per frame. The baseline only moves while the keypoint is
+        close to it, so gestures don't pollute it. It starts at the median position over the whole
+        video (for a seated person that is the rest pose) instead of the first frame, which could be
+        in the middle of a gesture and freeze the baseline in the wrong place.
+        """
+        n = len(self.xn)
+        bx_arr = np.full(n, np.nan)
+        by_arr = np.full(n, np.nan)
+        self.baselines = {}
+        valid = ~np.isnan(self.xn) & ~np.isnan(self.yn)
+        if not valid.any():
+            self.baseline_x, self.baseline_y = bx_arr, by_arr
+            return
+
+        fps = fps or getattr(self.gesture_analysis, "frame_rate", REFERENCE_FPS)
+        a = alpha ** (REFERENCE_FPS / fps)  # same time constant at any fps
+
+        bx = float(np.median(self.xn[valid]))
+        by = float(np.median(self.yn[valid]))
+        xs, ys = self.xn, self.yn
+        for i in np.nonzero(valid)[0]:
+            x, y = xs[i], ys[i]
+            if np.hypot(x - bx, y - by) < max_update_dist:
+                bx = a * bx + (1 - a) * x
+                by = a * by + (1 - a) * y
+            bx_arr[i] = bx
+            by_arr[i] = by
+            self.baselines[int(i)] = (bx, by)
+        self.baseline_x, self.baseline_y = bx_arr, by_arr
+
+    # ------------------------------------------------------------------
+    # Window slices used by the features (vectorized)
+    # ------------------------------------------------------------------
+    def window(self, start, end):
+        """Slice [start, end) of the masked per-frame arrays."""
+        return {
+            "vel": self._vel_m[start:end],
+            "acc": self._acc_m[start:end],
+            "vx": self._vx_m[start:end],
+            "vy": self._vy_m[start:end],
+            "xn": self.xn[start:end],
+            "yn": self.yn[start:end],
+        }
+
+    # ------------------------------------------------------------------
+    # Per-frame accessors (kept for the debug exporters / plots)
+    # ------------------------------------------------------------------
+    def _in_range(self, frame_idx):
+        return 0 <= frame_idx < len(self.valid)
+
+    def confident(self, frame_idx, confidence_threshold=None):
+        return self._in_range(frame_idx) and bool(self.valid[frame_idx])
+
+    def get_coordinates(self, frame_idx):
+        if not self._in_range(frame_idx) or not self.valid[frame_idx]:
+            return (None, None)
+        return (float(self.x[frame_idx]), float(self.y[frame_idx]))
+
+    def get_normalized_coordinates(self, frame_idx):
+        if not self._in_range(frame_idx) or np.isnan(self.xn[frame_idx]) or np.isnan(self.yn[frame_idx]):
+            return (None, None)
+        return (float(self.xn[frame_idx]), float(self.yn[frame_idx]))
+
+    def get_velocity_magnitude(self, frame_idx):
+        return float(self._vel_m[frame_idx]) if 0 <= frame_idx < len(self._vel_m) else 0.0
+
+    compute_velocity_magnitude = get_velocity_magnitude
+
+    def get_velocity_vector(self, frame_idx):
+        if not 0 <= frame_idx < len(self._vx_m):
+            return (0.0, 0.0)
+        return (float(self._vx_m[frame_idx]), float(self._vy_m[frame_idx]))
+
+    def get_acceleration_magnitude(self, frame_idx):
+        return float(self._acc_m[frame_idx]) if 0 <= frame_idx < len(self._acc_m) else 0.0
+
+    compute_acceleration_magnitude = get_acceleration_magnitude
+
+    @property
+    def frames(self):
+        """dict[frame_idx -> Frame] built on demand (only the debug exporters need it)."""
+        if self._frames is None:
+            self._frames = {}
+            for i in np.nonzero(~np.isnan(self.conf))[0]:
+                i = int(i)
+                x = self.x[i] if len(self.x) and not np.isnan(self.x[i]) else self.raw_x[i]
+                y = self.y[i] if len(self.y) and not np.isnan(self.y[i]) else self.raw_y[i]
+                f = Frame(i, float(x), float(y), float(self.conf[i]))
+                f.add_body_part_reference(self)
+                if len(self.xn) and not np.isnan(self.xn[i]):
+                    f.x_normalized = float(self.xn[i])
+                    f.y_normalized = float(self.yn[i])
+                self._frames[i] = f
+        return self._frames
 
     def __repr__(self):
-        return f"BodyPart('{self.part_name}', frames={len(self.frames)}"
+        return f"BodyPart('{self.part_name}', frames={len(self)})"
 
     def display_frames(self):
-        """
-        Print all frames for this gesture part in order.
-        """
         for fn in sorted(self.frames.keys()):
             print(self.frames[fn])

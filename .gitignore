@@ -17,3 +17,5 @@ INPUT_VIDEOs
 OUTPUT_INPUT_VIDEOS
 debug
 .env
+# RTMPose models, downloaded automatically on first run
+models

@@ -1,8 +1,18 @@
-from gesture_manager.features import Features
-from config import COCO_PARTS, HAND_PARTS, CORRECTION_FACTOR_HANDS, CORRECTION_FACTOR_VAR
 import numpy as np
-from math_utility import joint_angle
-import math
+
+from config import COCO_PARTS, CORRECTION_FACTOR_HANDS, CORRECTION_FACTOR_VAR
+from gesture_manager.features import Features
+
+# Virtual reference point: straight down from the joint. Used for the shoulder angle so that it does
+# not depend on the hips being visible (a table often hides them for a seated person).
+DOWN = "__down__"
+
+
+def _p90(values):
+    values = [v for v in values if v is not None]
+    if not values:
+        return None
+    return float(np.nanpercentile(values, 90))
 
 
 class FeaturesManager:
@@ -13,45 +23,48 @@ class FeaturesManager:
     ANGLE_DEFINITIONS = {
         "L_elbow": ("LShoulder", "LElbow", "LWrist"),
         "R_elbow": ("RShoulder", "RElbow", "RWrist"),
-        "L_shoulder": ("MidHip", "LShoulder", "LElbow"),
-        "R_shoulder": ("MidHip", "RShoulder", "RElbow"),
+        # Upper arm vs. vertical (arm raising / swinging)
+        "L_shoulder": (DOWN, "LShoulder", "LElbow"),
+        "R_shoulder": (DOWN, "RShoulder", "RElbow"),
     }
+    BASELINE_PARTS = ["LWrist", "RWrist"]
+
     def __init__(self, sw):
         self.person = sw.person
         self.sw = sw
         self.body_features = {}
+        # Hand keypoints are not used by the score; skipping their per-window features is a large
+        # speed-up. The raw hand data is still available on the person if needed.
         self.left_hand_features = {}
         self.right_hand_features = {}
 
-        # --- COCO body parts ---
         for part_name in COCO_PARTS:
             body_part = self.person.get_body_part(part_name)
-            if body_part is None:
-                continue
-
-            self.body_features[part_name] = Features(body_part, self.sw)
-
-        # --- Hand parts (left & right) ---
-        for side in ("L", "R"):
-            for hand_part in HAND_PARTS:
-                full_part_name = f"{side}_{hand_part}"
-                body_part = self.person.get_body_part(full_part_name)
-                if body_part is None:
-                    continue
-                if side == "L":
-                    self.left_hand_features[hand_part] = Features(body_part, self.sw)
-                else:
-                    self.right_hand_features[hand_part] = Features(body_part, self.sw) 
+            if body_part is not None:
+                self.body_features[part_name] = Features(body_part, self.sw)
 
         self.compute_features()
 
+    def _interest(self, attr):
+        out = []
+        for part in self.INTEREST_PARTS:
+            f = self.body_features.get(part)
+            if f is not None and getattr(f, attr) is not None:
+                out.append(getattr(f, attr))
+        return out
+
+    def _mean_interest(self, attr):
+        values = self._interest(attr)
+        return sum(values) / len(values) if values else 0.0
+
     def compute_features(self):
-        self.motion_persistance = self.mean_motion_persistance_interest_parts()
-        self.velocity = self.mean_velocity_interest_parts()
-        self.velocity_variance = self.mean_velocity_variance_interest_parts() * CORRECTION_FACTOR_VAR
-        self.max_energy = self.max_energy_interest_parts() * CORRECTION_FACTOR_HANDS
-        self.left_hand_energy = self.max_hand_energy("L") * CORRECTION_FACTOR_HANDS
-        self.right_hand_energy = self.max_hand_energy("R") * CORRECTION_FACTOR_HANDS
+        self.motion_persistance = self._mean_interest("motion_persistence")
+        self.velocity = self._mean_interest("mean_velocity")
+        self.velocity_variance = self._mean_interest("velocity_variance") * CORRECTION_FACTOR_VAR
+        self.max_energy = (_p90(self._interest("motion_energy")) or 0.0) * CORRECTION_FACTOR_HANDS
+        self.left_hand_energy = self._wrist_energy("LWrist") * CORRECTION_FACTOR_HANDS
+        self.right_hand_energy = self._wrist_energy("RWrist") * CORRECTION_FACTOR_HANDS
+
         angle_features = self.compute_joint_angles_and_velocity()
         self.l_elbow_angle = angle_features["L_elbow_angle_mean"]
         self.r_elbow_angle = angle_features["R_elbow_angle_mean"]
@@ -61,405 +74,90 @@ class FeaturesManager:
         self.r_elbow_angular_velocity = angle_features["R_elbow_angvel_mean"]
         self.r_shoulder_angular_velocity = angle_features["R_shoulder_angvel_mean"]
         self.l_shoulder_angular_velocity = angle_features["L_shoulder_angvel_mean"]
+        self.max_angular = float(np.nanmax([
+            self.l_elbow_angular_velocity, self.r_elbow_angular_velocity,
+            self.r_shoulder_angular_velocity, self.l_shoulder_angular_velocity,
+            0.0,
+        ]))
+
         self.distal_proximal_ratio = self.compute_distal_proximal_motion_ratio()
-        self.max_acceleration = self.max_acceleration_interest_parts()
-        self.max_angular = max(self.l_elbow_angular_velocity, self.r_elbow_angular_velocity,self.r_shoulder_angular_velocity,self.l_shoulder_angular_velocity)
-        
-        self.max_motion_saliency = self.max_motion_saliency_interest_parts() * 0.1
-        self.max_burstiness = self.max_burstiness_interest_parts()
-        self.max_directional_consistency = self.max_directional_consistency_interest_parts()
-        self.max_path_efficiency = self.max_path_efficiency_interest_parts()  * 0.1
-        self.max_direction_changes = self.max_direction_changes_interest_parts()
-        self.max_distance_vertical = abs(self.max_distance_from_baseline_vertical())
-        self.max_distance_horizontal = abs(self.max_distance_from_baseline_horizontal())
+        self.max_acceleration = _p90(self._interest("max_acceleration"))
+        self.max_motion_saliency = (_p90(self._interest("motion_saliency")) or 0.0) * 0.1
+        self.max_burstiness = _p90(self._interest("burstiness"))
+        self.max_directional_consistency = _p90(self._interest("directional_consistency"))
+        self.max_path_efficiency = (_p90(self._interest("path_efficiency")) or 0.0) * 0.1
+        self.max_direction_changes = _p90(self._interest("direction_changes"))
 
-        # self.mean_baseline_distance = self.max_distance_from_baseline_interest_parts()
-        # TODO: investigate this some more? Maybe!
-        self.mean_baseline_distance = max(self.max_distance_vertical, self.max_distance_horizontal)
+        dist, dist_x, dist_y = self.distance_from_baseline()
+        self.max_distance_horizontal = dist_x
+        self.max_distance_vertical = dist_y
+        # How far the wrists are from their rest position (used to detect "holds")
+        self.mean_baseline_distance = dist
 
-    def mean_motion_persistance_interest_parts(self):
-        persistance_per_part = []
-        count = 0
-        for part in self.INTEREST_PARTS:
-            f = self.body_features.get(part)
-            if f and f.motion_persistence is not None:
-                persistance_per_part.append(f.motion_persistence)
-                count += 1
-        return sum(persistance_per_part)/count if count > 0 else 0.0
-    def max_acceleration_interest_parts(self):
-        accs = []
-        for part in self.INTEREST_PARTS:
-            f = self.body_features.get(part)
-            if f and f.max_acceleration is not None:
-                accs.append(f.max_acceleration)
+    def _wrist_energy(self, part):
+        f = self.body_features.get(part)
+        return f.motion_energy if f is not None else 0.0
 
-        if not accs:
-            return None
+    def compute_distal_proximal_motion_ratio(self):
+        distal = [self.body_features[p].mean_velocity for p in ("RWrist", "LWrist", "RElbow", "LElbow")
+                  if p in self.body_features]
+        proximal = [self.body_features[p].mean_velocity for p in ("RShoulder", "LShoulder")
+                    if p in self.body_features]
+        avg_distal = sum(distal) / max(len(distal), 1)
+        avg_proximal = sum(proximal) / max(len(proximal), 1)
+        return avg_distal - avg_proximal
 
-        return float(np.nanpercentile(accs, 90))
-    def mean_velocity_interest_parts(self):
-        velocities = []
-        count = 0
-        for part in self.INTEREST_PARTS:
-            f = self.body_features.get(part)
-            if f and f.mean_velocity is not None:
-                velocities.append(f.mean_velocity)
-                count += 1
-        return sum(velocities)/count if count > 0 else 0.0
-    
-    def mean_velocity_variance_interest_parts(self):
-        velocities = []
-        count = 0
-        for part in self.INTEREST_PARTS:
-            f = self.body_features.get(part)
-            if f and f.velocity_variance is not None:
-                velocities.append(f.velocity_variance)
-                count += 1
+    def _coords(self, part_name, start, end):
+        part = self.person.get_body_part(part_name)
+        return np.stack([part.xn[start:end], part.yn[start:end]], axis=1)
 
-        return sum(velocities)/count if count > 0 else 0.0
-    
-    def max_energy_interest_parts(self):
-        energies = []
-        count = 0
-        for part in self.INTEREST_PARTS:
-            f = self.body_features.get(part)
-            if f and f.motion_energy is not None:
-                energies.append(f.motion_energy)
-                count +=1
-
-        return float(np.nanpercentile(energies, 90))
-    # def mean_hand_energy(self, side: str):
-    #     features = (
-    #         self.left_hand_features if side == "L"
-    #         else self.right_hand_features
-    #     )
-    #     len_features = len(features)
-    #     return sum(self._values(features, "motion_energy"))/len_features
-
-
-    def max_hand_energy(self, side: str):
-        features = (
-            self.body_features.get("LWrist") if side == "L"
-            else self.body_features.get("RWrist")
-        )
-        energies = []
-        if features and features.motion_energy is not None:
-                energies.append(features.motion_energy)
-
-        return float(np.nanpercentile(energies, 90))
-    # safe getter
-    def _values(self, features_dict, attr):
-        return [
-            getattr(f, attr)
-            for f in features_dict.values()
-            if hasattr(f, attr) and getattr(f, attr) is not None
-        ]
-    def compute_distal_proximal_motion_ratio(self, eps=1e-5):
-        distal_parts = ["RWrist", "LWrist", "RElbow", "LElbow"]
-        proximal_parts = ["RShoulder", "LShoulder"]
-
-        distal_velocities = []
-        proximal_velocities = []
-
-        for part in distal_parts:
-            f = self.body_features.get(part)
-            if f and f.mean_velocity is not None:
-                distal_velocities.append(f.mean_velocity)
-
-        for part in proximal_parts:
-            f = self.body_features.get(part)
-            if f and f.mean_velocity is not None:
-                proximal_velocities.append(f.mean_velocity)
-
-        # Compute per-joint averages instead of sums
-        avg_distal = sum(distal_velocities) / max(len(distal_velocities), 1)
-        avg_proximal = sum(proximal_velocities) / max(len(proximal_velocities), 1)
-
-        # Ratio
-        # ratio = math.log((avg_distal + eps) / (avg_proximal + eps))
-        ratio = avg_distal - avg_proximal
-        return ratio
-    
-    def compute_joint_angles_and_velocity(self, fps=24):
-            """
-            Compute mean joint angles and mean angular velocities over a window.
-
-            Returns:
-                features: dict with keys:
-                    "{joint}_angle_mean": mean angle in radians
-                    "{joint}_angvel_mean": mean angular velocity in radians/sec
-            """
-            np.seterr(all='ignore')
-            angles = {name: [] for name in self.ANGLE_DEFINITIONS}
-
-            # 1. Compute per-frame angles
-            for frame_idx in range(self.sw.start_frame + 1, self.sw.end_frame + 1):
-                for name, (p1, p2, p3) in self.ANGLE_DEFINITIONS.items():
-                    body_part1 = self.person.get_body_part(p1)
-                    body_part2 = self.person.get_body_part(p2)
-                    body_part3 = self.person.get_body_part(p3)
-
-                    try:
-                        # Get normalized coordinates
-                        p1_xy = body_part1.get_normalized_coordinates(frame_idx)
-                        p2_xy = body_part2.get_normalized_coordinates(frame_idx)
-                        p3_xy = body_part3.get_normalized_coordinates(frame_idx)
-                        # if p1_xy is not None and p2_xy is not None and p3_xy is not None:
-                        angle = joint_angle(p1_xy, p2_xy, p3_xy)
-                    except Exception:
-                        angle = np.nan  # Missing joints
-
-                    angles[name].append(angle)
-
-            features = {}
-
-            # 2. Convert to arrays, compute mean angle and mean angular velocity
-            for name, angle_list in angles.items():
-                angle_array = np.array(angle_list)
-
-                # Mean angle over the window
-                mean_angle = np.nanmean(angle_array)
-                features[f"{name}_angle_mean"] = mean_angle
-
-                # Angular velocity (radians/sec)
-                if len(angle_array) > 1:
-                    ang_vel = np.gradient(angle_array) * fps  # d(angle)/dt
-                    mean_ang_vel = np.nanmean(np.abs(ang_vel))
+    def compute_joint_angles_and_velocity(self):
+        """Mean joint angle (rad) and mean absolute angular velocity (rad/s) over the window."""
+        start, end = self.sw.start_frame + 1, self.sw.end_frame + 1
+        features = {}
+        with np.errstate(all="ignore"):
+            for name, (p1, p2, p3) in self.ANGLE_DEFINITIONS.items():
+                b = self._coords(p2, start, end)
+                c = self._coords(p3, start, end)
+                if p1 == DOWN:
+                    a = b + np.array([0.0, 1.0])  # image y axis points down
                 else:
-                    mean_ang_vel = np.nan
+                    a = self._coords(p1, start, end)
+                v1, v2 = a - b, c - b
+                cross = v1[:, 0] * v2[:, 1] - v1[:, 1] * v2[:, 0]
+                dot = (v1 * v2).sum(axis=1)
+                angle = np.abs(np.arctan2(cross, dot))
 
-                features[f"{name}_angvel_mean"] = mean_ang_vel
+                finite = np.isfinite(angle)
+                features[f"{name}_angle_mean"] = float(np.mean(angle[finite])) if finite.any() else np.nan
+                if len(angle) > 1:
+                    ang_vel = np.abs(np.gradient(angle)) * self.sw.fps
+                    ok = np.isfinite(ang_vel)
+                    features[f"{name}_angvel_mean"] = float(np.mean(ang_vel[ok])) if ok.any() else np.nan
+                else:
+                    features[f"{name}_angvel_mean"] = np.nan
+        return features
 
-            return features
-    def max_distance_from_baseline_interest_parts(self):
+    def distance_from_baseline(self):
         """
-        Computes mean distance from baseline for INTEREST_PARTS
-        using the baseline corresponding to the sliding window start frame.
+        90th percentile (over the window) of the wrist distance to its rest position, max over both
+        wrists. Returns (euclidean, |horizontal|, |vertical|).
         """
-        interest_parts = ["LWrist","RWrist"]
-        distances = []
-
-        # for part_name in self.INTEREST_PARTS:
-        for part_name in interest_parts:
-            body_part = self.person.get_body_part(part_name)
-            if body_part is None:
+        start, end = self.sw.start_frame, self.sw.end_frame + 1
+        dist, dist_x, dist_y = [], [], []
+        for part_name in self.BASELINE_PARTS:
+            part = self.person.get_body_part(part_name)
+            if part is None or len(part.baseline_x) == 0:
                 continue
-
-            if not hasattr(body_part, "baselines"):
+            dx = part.xn[start:end] - part.baseline_x[start:end]
+            dy = part.yn[start:end] - part.baseline_y[start:end]
+            ok = np.isfinite(dx) & np.isfinite(dy)
+            if not ok.any():
                 continue
-
-            
-
-            # compute distances within window
-            part_dists = []
-            for frame_idx in range(self.sw.start_frame, self.sw.end_frame + 1):
-                # frame = body_part.frames.get(frame_idx)
-                baseline = body_part.baselines.get(frame_idx)
-                if baseline is None:
-                    continue
-
-                bx, by = baseline
-                x_normalized, y_normalized = body_part.get_normalized_coordinates(frame_idx)
-                if x_normalized is None or y_normalized is None:
-                    continue
-
-                dx = x_normalized - bx
-                dy = y_normalized - by
-                part_dists.append(np.hypot(dx, dy))
-
-            if part_dists:
-                distances.append(np.percentile(part_dists, 90))
-
-        if distances:
-            return max(distances) 
-        return 0.0
-
-    # def max_distance_from_baseline_interest_parts(self):
-
-    #     interest_parts = ["LWrist", "RWrist"]
-    #     distances = []
-
-    #     window_k = 5  # smoothing window
-
-    #     for part_name in interest_parts:
-
-    #         body_part = self.person.get_body_part(part_name)
-    #         if body_part is None or not hasattr(body_part, "baselines"):
-    #             continue
-
-    #         part_dists = []
-    #         rolling = []
-
-    #         for frame_idx in range(self.sw.start_frame, self.sw.end_frame + 1):
-
-    #             baseline = body_part.baselines.get(frame_idx)
-    #             if baseline is None:
-    #                 continue
-
-    #             bx, by = baseline
-
-    #             coords = body_part.get_normalized_coordinates(frame_idx)
-    #             if coords is None:
-    #                 continue
-
-    #             x, y = coords
-    #             if x is None or y is None:
-    #                 continue
-
-    #             dx = x - bx
-    #             dy = y - by
-
-    #             dist = np.hypot(dx, dy)
-
-    #             # smoothing over time
-    #             rolling.append(dist)
-    #             if len(rolling) > window_k:
-    #                 rolling.pop(0)
-
-    #             part_dists.append(max(rolling))
-
-    #         if part_dists:
-    #             distances.append(np.percentile(part_dists, 90))
-
-    #     return max(distances) if distances else 0.0
-    def max_distance_from_baseline_horizontal(self):
-        """
-        Computes mean distance from baseline for INTEREST_PARTS
-        using the baseline corresponding to the sliding window start frame.
-        """
-        interest_parts = ["LWrist","RWrist"]
-        distances = []
-
-        # for part_name in self.INTEREST_PARTS:
-        for part_name in interest_parts:
-            body_part = self.person.get_body_part(part_name)
-            if body_part is None:
-                continue
-
-            if not hasattr(body_part, "baselines"):
-                continue
-
-            
-
-            # compute distances within window
-            part_dists = []
-            for frame_idx in range(self.sw.start_frame, self.sw.end_frame + 1):
-                # frame = body_part.frames.get(frame_idx)
-                baseline = body_part.baselines.get(frame_idx)
-                if baseline is None:
-                    continue
-
-                bx, by = baseline
-                x_normalized, y_normalized = body_part.get_normalized_coordinates(frame_idx)
-                if x_normalized is None or y_normalized is None:
-                    continue
-
-                dx = x_normalized - bx
-                part_dists.append(dx)
-
-            if part_dists:
-                distances.append(np.percentile(part_dists, 90))
-
-        if distances:
-            return max(distances) 
-        return 0.0
-    def max_distance_from_baseline_vertical(self):
-        """
-        Computes mean distance from baseline for INTEREST_PARTS
-        using the baseline corresponding to the sliding window start frame.
-        """
-        interest_parts = ["LWrist","RWrist"]
-        distances = []
-
-        # for part_name in self.INTEREST_PARTS:
-        for part_name in interest_parts:
-            body_part = self.person.get_body_part(part_name)
-            if body_part is None:
-                continue
-
-            if not hasattr(body_part, "baselines"):
-                continue
-
-            
-
-            # compute distances within window
-            part_dists = []
-            for frame_idx in range(self.sw.start_frame, self.sw.end_frame + 1):
-                # frame = body_part.frames.get(frame_idx)
-                baseline = body_part.baselines.get(frame_idx)
-                if baseline is None:
-                    continue
-
-                bx, by = baseline
-                x_normalized, y_normalized = body_part.get_normalized_coordinates(frame_idx)
-                if x_normalized is None or y_normalized is None:
-                    continue
-
-                dy = y_normalized - by
-                part_dists.append(dy)
-
-            if part_dists:
-                distances.append(np.percentile(part_dists, 90))
-
-        if distances:
-            return max(distances) 
-        return 0.0
-    def max_motion_saliency_interest_parts(self):
-        sal = []
-        for part in self.INTEREST_PARTS:
-            f = self.body_features.get(part)
-            if f and f.motion_saliency is not None:
-                sal.append(f.motion_saliency)
-
-        if not sal:
-            return None
-
-        return float(np.nanpercentile(sal, 90))    
-
-    def max_burstiness_interest_parts(self):
-        bursts = []
-        for part in self.INTEREST_PARTS:
-            f = self.body_features.get(part)
-            if f and f.burstiness is not None:
-                bursts.append(f.burstiness)
-
-        if not bursts:
-            return None
-
-        return float(np.nanpercentile(bursts, 90))   
-    
-    def max_directional_consistency_interest_parts(self):
-        dirs = []
-        for part in self.INTEREST_PARTS:
-            f = self.body_features.get(part)
-            if f and f.directional_consistency is not None:
-                dirs.append(f.directional_consistency)
-
-        if not dirs:
-            return None
-
-        return float(np.nanpercentile(dirs, 90))   
-    
-    def max_direction_changes_interest_parts(self):
-        dirs = []
-        for part in self.INTEREST_PARTS:
-            f = self.body_features.get(part)
-            if f and f.direction_changes is not None:
-                dirs.append(f.direction_changes)
-
-        if not dirs:
-            return None
-
-        return float(np.nanpercentile(dirs, 90))   
-    
-    def max_path_efficiency_interest_parts(self):
-        effs = []
-        for part in self.INTEREST_PARTS:
-            f = self.body_features.get(part)
-            if f and f.path_efficiency is not None:
-                effs.append(f.path_efficiency)
-
-        if not effs:
-            return None
-
-        return float(np.nanpercentile(effs, 90))   
+            dx, dy = dx[ok], dy[ok]
+            dist.append(np.percentile(np.hypot(dx, dy), 90))
+            dist_x.append(np.percentile(np.abs(dx), 90))
+            dist_y.append(np.percentile(np.abs(dy), 90))
+        if not dist:
+            return 0.0, 0.0, 0.0
+        return float(max(dist)), float(max(dist_x)), float(max(dist_y))
