@@ -80,6 +80,12 @@ class FeaturesManager:
             0.0,
         ]))
 
+        # Mean speed of the faster wrist. Unlike `velocity` (average over shoulders, elbows and
+        # wrists), it is not diluted by the shoulders, which hardly move during a gesture.
+        wrist_speeds = [self.body_features[p].mean_velocity for p in ("LWrist", "RWrist")
+                        if p in self.body_features]
+        self.wrist_speed = max(wrist_speeds) if wrist_speeds else 0.0
+
         self.distal_proximal_ratio = self.compute_distal_proximal_motion_ratio()
         self.max_acceleration = _p90(self._interest("max_acceleration"))
         self.max_motion_saliency = (_p90(self._interest("motion_saliency")) or 0.0) * 0.1

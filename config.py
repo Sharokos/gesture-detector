@@ -56,6 +56,44 @@ SKIP_EXISTING_JSONS = _env_bool("SKIP_EXISTING_JSONS", True)
 # rescaled automatically to the real FPS of each video, so a 25 fps and a 30 fps video behave the same.
 REFERENCE_FPS = 30
 
+# ---------------- Score ----------------
+# "robust": every feature is first put on a common scale, per video:
+#              z = (log(value) - median) / IQR      (log only for the features in LOG_FEATURES)
+#           so a weight really is the share of importance, whatever the units of the feature, and
+#           people who move a lot / little overall are handled the same way. Uses WEIGHTS_NORMALIZED.
+# "none":   old behaviour, raw values times WEIGHTS (weights then also have to compensate for units).
+FEATURE_NORMALIZATION = os.getenv("FEATURE_NORMALIZATION", "robust").strip().lower()
+
+# Weights for FEATURE_NORMALIZATION = "robust". Any numeric attribute of FeaturesManager can be
+# used as a key (see windows.csv / person_0_plot.html for the list). Keep the set small and
+# non-redundant: velocity, max_energy, wrist_speed and max_acceleration are strongly correlated
+# (all measure "how much the arms move"), so piling them up only double-counts the same signal.
+WEIGHTS_NORMALIZED = {
+    # How fast the faster hand moves (wrists only: shoulders barely move when gesturing)
+    "wrist_speed": 0.45,
+    # Elbow / shoulder rotation: catches gestures where the forearm rotates but the wrist travels little
+    "max_angular": 0.35,
+    # Speed changes: strokes start and stop abruptly, slow drifts don't
+    "max_acceleration": 0.20,
+    # How far the hands are from their rest position. Off by default: a lasting posture change
+    # (e.g. arms crossed) would keep it high. It is still used to detect held gestures ("holds").
+    "mean_baseline_distance": 0.0,
+    # Redundant with wrist_speed (energy ~ speed squared, velocity = average incl. shoulders)
+    "max_energy": 0.0,
+    "velocity": 0.0,
+    # Ratios (max/mean, std/mean) that become large when the person is almost still -> mostly noise
+    "max_motion_saliency": 0.0,
+    "max_burstiness": 0.0,
+}
+# Skewed features (long tail of strong movements) are compared in log scale
+LOG_FEATURES = {
+    "wrist_speed", "velocity", "max_energy", "max_angular", "max_acceleration",
+    "mean_baseline_distance", "velocity_variance",
+}
+# Normalized values are clipped to this range so a single glitch cannot dominate a window
+NORMALIZED_CLIP = (-4.0, 8.0)
+
+# Raw weights, only used with FEATURE_NORMALIZATION = "none"
 CORRECTION_FACTOR_VAR = 100000
 CORRECTION_FACTOR_HANDS = 100
 WEIGHTS ={

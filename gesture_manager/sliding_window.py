@@ -25,8 +25,8 @@ class SlidingWindow():
         self.is_gesture = 0
         self.in_gesture = False
 
-    def recompute_score(self):
-        self.score = compute_score(self.features_manager)
+    def recompute_score(self, normalization_stats=None):
+        self.score = compute_score(self.features_manager, normalization_stats)
 
     def contains_gesture(self, score_threshold=SCORE_THRESHOLD):
         if self.start_frame <= self.duration_frames * 2:

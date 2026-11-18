@@ -13,6 +13,7 @@ FEATURE_COLUMNS = [
 
 MANAGER_COLUMNS = [
     "velocity",
+    "wrist_speed",
     "velocity_variance",
     "max_energy",
     "left_hand_energy",

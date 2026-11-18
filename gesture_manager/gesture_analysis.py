@@ -16,8 +16,10 @@ from config import (
     SCORE_PERCENTILE,
     DISTANCE_PERCENTILE,
     SCORE_THRESHOLD_FACTOR,
+    FEATURE_NORMALIZATION,
     frames_at_fps,
 )
+from gesture_manager.score_computer import compute_normalization_stats
 import csv
 import os
 import numpy as np
@@ -80,19 +82,22 @@ class GestureAnalysis:
         return self.persons[0].build_all_data_debug_smooth(smoothing_windows)
     
     @staticmethod
-    def compute_thresholds(scores, distances, method=THRESHOLD_METHOD):
+    def compute_thresholds(scores, distances, method=THRESHOLD_METHOD, log_scores=True):
         """
         Per-video thresholds for the score and the wrist-to-rest distance.
 
         "otsu" looks for the natural split between rest and movement, so a calm video gets few
         gestures and a busy one gets many. "percentile" (the old behaviour) always marks about the
         same fraction of every video, whatever happens in it.
+        `log_scores`: raw scores are skewed and positive -> Otsu in log space. Normalized scores are
+        already built from log features and can be negative -> plain Otsu.
         """
         scores = np.asarray(scores, dtype=float)
         distances = np.asarray(distances, dtype=float)
         if method == "otsu":
             try:
-                return log_otsu_threshold(scores), otsu_threshold(distances)
+                score_threshold = log_otsu_threshold(scores) if log_scores else otsu_threshold(scores)
+                return score_threshold, otsu_threshold(distances)
             except ValueError as e:
                 print(f"WARNING: Otsu thresholding failed ({e}), falling back to percentiles")
         if len(scores) == 0:
@@ -105,27 +110,44 @@ class GestureAnalysis:
     def determine_gestures_for_person(self, person_id, output_path=None, media_path=None):
         self.clean_features_outliers_for_person(person_id)
         person_windows = self.get_windows_for_person(person_id)
-        for w in person_windows:
-            w.recompute_score()
-
         # Windows at the very start are ignored by the detector, keep them out of the statistics too
         settled = [w for w in person_windows if w.start_frame > 2 * self.window_size] or person_windows
-        threshold, threshold_distances = self.compute_thresholds(
-            [w.score for w in settled],
-            [w.features_manager.mean_baseline_distance for w in settled],
+
+        normalized = FEATURE_NORMALIZATION != "none"
+        self.normalization_stats = (
+            compute_normalization_stats([w.features_manager for w in settled]) if normalized else None
         )
-        threshold *= SCORE_THRESHOLD_FACTOR
+        for w in person_windows:
+            w.recompute_score(self.normalization_stats)
+
+        scores = np.array([w.score for w in settled])
+        threshold, threshold_distances = self.compute_thresholds(
+            scores,
+            [w.features_manager.mean_baseline_distance for w in settled],
+            log_scores=not normalized,
+        )
+        if normalized:
+            # Scores are centred on 0 and can be negative: the factor scales the distance from the
+            # median score, and the "keep going" threshold sits a fixed part of the spread lower.
+            median = float(np.median(scores))
+            spread = float(np.subtract(*np.percentile(scores, [75, 25]))) or 1.0
+            threshold = median + (threshold - median) * SCORE_THRESHOLD_FACTOR
+            continue_threshold = threshold - 0.1 * spread
+        else:
+            threshold *= SCORE_THRESHOLD_FACTOR
+            continue_threshold = 0.9 * threshold
         for w in person_windows:
             w.threshold = threshold
             w.distance_threhsold = threshold_distances
-        print(f"Score threshold ({THRESHOLD_METHOD}): {threshold:.4f}, "
-              f"hold distance threshold: {threshold_distances:.4f}")
+        print(f"Score threshold ({THRESHOLD_METHOD}, normalization={FEATURE_NORMALIZATION}): "
+              f"{threshold:.4f}, hold distance threshold: {threshold_distances:.4f}")
 
         segments = self.detect_gesture_segments(
             person_windows,
             start_thresh=threshold,
             hold_distance_thresh=threshold_distances,
             min_length=1,
+            continue_thresh=continue_threshold,
         )
         for w in person_windows:
             w.in_gesture = False
@@ -338,6 +360,7 @@ class GestureAnalysis:
 
         fm_fields = [
             "velocity",
+            "wrist_speed",
             "velocity_variance",
             "max_energy",
             "motion_persistance",
@@ -394,6 +417,7 @@ class GestureAnalysis:
         hold_distance_thresh=0.05,
         min_length=2,
         max_hold_frames=MAX_NUMBER_OF_HOLD_WINDOWS,
+        continue_thresh=None,
     ):
 
         segments = []
@@ -401,7 +425,8 @@ class GestureAnalysis:
         hold_buffer = []
 
         state = 0  # IDLE
-        continue_thresh = 0.9 * start_thresh
+        if continue_thresh is None:
+            continue_thresh = 0.9 * start_thresh
 
         hold_count = 0
 

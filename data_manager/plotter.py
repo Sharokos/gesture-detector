@@ -21,6 +21,7 @@ def plot_person_sliding_windows(gesture_analysis, person_id, output_dir=None):
     # -------------------------
     fm_params = [
         "velocity",
+        "wrist_speed",
         # "velocity_variance",
         "max_energy",
         "motion_persistance",
